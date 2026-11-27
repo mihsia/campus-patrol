@@ -17,10 +17,12 @@ import type {
   IncidentSeverity,
   IncidentStatus,
   NotificationPreferences,
+  SchoolSettings,
   StaffProfile,
   TimetableSlot,
 } from '../types/patrol';
 import {
+  ACTIVE_INCIDENT_CATEGORIES,
   INCIDENT_CATEGORY_LABELS,
   INCIDENT_SEVERITY_LABELS,
   INCIDENT_STATUS_LABELS,
@@ -38,6 +40,7 @@ import {
 interface IncidentsViewProps {
   profile: StaffProfile;
   isAdmin: boolean;
+  schoolSettings: SchoolSettings;
   selectedDate: string;
   selectedPeriod: number;
   timetables: TimetableSlot[];
@@ -50,6 +53,7 @@ interface IncidentsViewProps {
 export const IncidentsView: React.FC<IncidentsViewProps> = ({
   profile,
   isAdmin,
+  schoolSettings,
   selectedDate,
   selectedPeriod,
   timetables,
@@ -65,10 +69,14 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
   const [browserPerm, setBrowserPerm] = useState(getBrowserNotificationPermission());
 
   const buildings = useMemo(() => {
-    const s = new Set<string>();
-    timetables.forEach((t) => s.add(t.building));
-    return ['ALL', ...Array.from(s).sort()];
-  }, [timetables]);
+    const ordered = [...schoolSettings.buildings];
+    timetables.forEach((t) => {
+      if (t.building && !ordered.includes(t.building)) {
+        ordered.push(t.building);
+      }
+    });
+    return ['ALL', ...ordered];
+  }, [schoolSettings.buildings, timetables]);
 
   const filteredIncidents = useMemo(() => {
     const sevOrder = { high: 0, medium: 1, low: 2 };
@@ -112,8 +120,8 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
       date: selectedDate,
       period: selectedPeriod,
       timetableId: '',
-      location: '教學A棟 A201 · 高一忠',
-      className: '高一忠',
+      location: `${schoolSettings.buildings[0] || '行政教學大樓'} 101 · 一甲`,
+      className: '一甲',
       category: 'teacher_absent',
       severity: 'high',
       title: '系統推播測試：緊急巡堂異常警示',
@@ -436,12 +444,12 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
             </div>
             <div className="space-y-3 text-xs text-slate-600 divide-y divide-slate-100">
               <div className="pt-1 space-y-1">
-                <p className="font-semibold text-red-700">第一級・緊急通報（教師未到／安全傷病／高風險曠課）</p>
+                <p className="font-semibold text-red-700">第一級・緊急通報（教師未準時／未按課表／安全傷病）</p>
                 <p>即時觸發全校管理員與巡堂人員瀏覽器推播、警示音與頂部常駐警示列；逾 5 分鐘未接手自動標記升級提醒。</p>
               </div>
               <div className="pt-2.5 space-y-1">
-                <p className="font-semibold text-amber-700">第二級・中度異常（秩序不佳／連續兩節缺席）</p>
-                <p>派發至對應樓棟巡堂人員與生教組即時通知彈窗；逾 15 分鐘未處理進入逾時追蹤清單。</p>
+                <p className="font-semibold text-amber-700">第二級・中度異常（班級秩序欠佳／學習狀況異常）</p>
+                <p>派發至對應樓棟巡堂人員與教務處即時通知彈窗；逾 15 分鐘未處理進入逾時追蹤清單。</p>
               </div>
               <div className="pt-2.5 space-y-1">
                 <p className="font-semibold text-slate-700">第三級・一般提醒（教室設備修繕／單次紀錄）</p>
@@ -571,9 +579,9 @@ const CreateIncidentModal: React.FC<CreateIncidentModalProps> = ({
                 onChange={(e) => setCategory(e.target.value as IncidentCategory)}
                 className="w-full min-h-[42px] px-3 text-sm border border-slate-200 rounded-lg bg-white"
               >
-                {Object.entries(INCIDENT_CATEGORY_LABELS).map(([k, v]) => (
+                {ACTIVE_INCIDENT_CATEGORIES.map((k) => (
                   <option key={k} value={k}>
-                    {v}
+                    {INCIDENT_CATEGORY_LABELS[k]}
                   </option>
                 ))}
               </select>
@@ -622,7 +630,7 @@ const CreateIncidentModal: React.FC<CreateIncidentModalProps> = ({
               maxLength={80}
               value={location}
               onChange={(e) => setLocation(e.target.value)}
-              placeholder="例如：教學A棟 A201 · 高一忠"
+              placeholder="例如：行政教學大樓 101 · 一甲"
               className="w-full min-h-[42px] px-3 text-sm border border-slate-200 rounded-lg"
             />
           </div>

@@ -1,66 +1,81 @@
-import React, { useMemo, useState } from 'react';
-import { Download, FileSpreadsheet, FileText, Printer } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { FileDown, FileSpreadsheet, Printer } from 'lucide-react';
 import type {
-  AbsenceRecord,
   IncidentReport,
-  LeaveRecord,
+  PatrolCheckItem,
   PatrolLog,
+  SchoolSettings,
+  SemesterType,
   TimetableSlot,
 } from '../types/patrol';
 import {
-  AUTO_ABSENCE_STATUS_LABELS,
   INCIDENT_CATEGORY_LABELS,
   INCIDENT_SEVERITY_LABELS,
   INCIDENT_STATUS_LABELS,
-  PATROL_STATUS_LABELS,
-  RISK_LEVEL_LABELS,
 } from '../types/patrol';
-import { buildStudentRiskSummaries } from '../lib/truancyEngine';
-import { exportCsvWithBom, exportFullExcelWorkbook } from '../lib/exportReports';
+import {
+  buildPatrolReportRows,
+  exportPatrolExcelWorkbook,
+  exportPatrolWordDocx,
+} from '../lib/exportReports';
 
 interface ReportsViewProps {
+  schoolSettings: SchoolSettings;
   selectedDate: string;
   timetables: TimetableSlot[];
   patrolLogs: PatrolLog[];
-  absences: AbsenceRecord[];
-  leaveRecords: LeaveRecord[];
   incidents: IncidentReport[];
   onActionFeedback: (message: string) => void;
 }
 
-type ReportTemplate = 'comprehensive' | 'truancy' | 'incidents';
+type ReportMode = 'weekly_standard' | 'logged_only';
 
 export const ReportsView: React.FC<ReportsViewProps> = ({
+  schoolSettings,
   selectedDate,
   timetables,
   patrolLogs,
-  absences,
-  leaveRecords,
   incidents,
   onActionFeedback,
 }) => {
-  const [schoolName, setSchoolName] = useState('國立範例高級中學');
+  const [schoolName, setSchoolName] = useState(schoolSettings.schoolName);
+  const [academicYear, setAcademicYear] = useState(schoolSettings.academicYear);
+  const [semester, setSemester] = useState<SemesterType>(schoolSettings.semester);
+  const [weekNumber, setWeekNumber] = useState<number | ''>(schoolSettings.currentWeek);
   const [startDate, setStartDate] = useState(selectedDate);
   const [endDate, setEndDate] = useState(selectedDate);
   const [buildingFilter, setBuildingFilter] = useState('ALL');
-  const [template, setTemplate] = useState<ReportTemplate>('comprehensive');
+  const [reportMode, setReportMode] = useState<ReportMode>('weekly_standard');
+  const [includeIncidentsAppendix, setIncludeIncidentsAppendix] = useState(false);
+  const [exportingWord, setExportingWord] = useState(false);
+
+  // Sync defaults when schoolSettings updates from Firestore
+  useEffect(() => {
+    setSchoolName(schoolSettings.schoolName);
+    setAcademicYear(schoolSettings.academicYear);
+    setSemester(schoolSettings.semester);
+    setWeekNumber(schoolSettings.currentWeek);
+  }, [schoolSettings]);
 
   const buildings = useMemo(() => {
-    const s = new Set<string>();
-    timetables.forEach((t) => s.add(t.building));
-    return ['ALL', ...Array.from(s).sort()];
-  }, [timetables]);
+    const ordered = [...schoolSettings.buildings];
+    timetables.forEach((t) => {
+      if (t.building && !ordered.includes(t.building)) {
+        ordered.push(t.building);
+      }
+    });
+    return ['ALL', ...ordered];
+  }, [schoolSettings.buildings, timetables]);
+
+  const filteredTimetables = useMemo(() => {
+    return timetables.filter((t) => buildingFilter === 'ALL' || t.building === buildingFilter);
+  }, [timetables, buildingFilter]);
 
   const filteredLogs = useMemo(() => {
     return patrolLogs
       .filter((l) => l.date >= startDate && l.date <= endDate)
-      .filter((l) => buildingFilter === 'ALL' || l.building === buildingFilter)
-      .sort((a, b) => a.date.localeCompare(b.date) || a.period - b.period || a.roomNumber.localeCompare(b.roomNumber));
+      .filter((l) => buildingFilter === 'ALL' || l.building === buildingFilter);
   }, [patrolLogs, startDate, endDate, buildingFilter]);
-
-  const filteredAbsences = useMemo(() => {
-    return absences.filter((a) => a.date >= startDate && a.date <= endDate);
-  }, [absences, startDate, endDate]);
 
   const filteredIncidents = useMemo(() => {
     return incidents
@@ -68,147 +83,114 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       .filter((i) => buildingFilter === 'ALL' || i.location.includes(buildingFilter));
   }, [incidents, startDate, endDate, buildingFilter]);
 
-  const { evaluatedAbsences, studentSummaries } = useMemo(
-    () => buildStudentRiskSummaries(filteredAbsences, leaveRecords, timetables),
-    [filteredAbsences, leaveRecords, timetables]
+  const reportRows = useMemo(
+    () =>
+      buildPatrolReportRows({
+        patrolLogs: filteredLogs,
+        timetables: filteredTimetables,
+        mode: reportMode,
+      }),
+    [filteredLogs, filteredTimetables, reportMode]
   );
 
-  const summaryStats = useMemo(() => {
-    const totalPatrols = filteredLogs.length;
-    const normalPatrols = filteredLogs.filter(
-      (l) => l.status === 'normal' || l.status === 'empty_relocated'
-    ).length;
-    const normalRate = totalPatrols > 0 ? Math.round((normalPatrols / totalPatrols) * 1000) / 10 : 100;
-    const truantCount = evaluatedAbsences.filter((a) => a.liveEval.autoStatus === 'truant').length;
-    const excusedCount = evaluatedAbsences.filter((a) => a.liveEval.autoStatus === 'excused_leave').length;
-    const resolvedIncidents = filteredIncidents.filter((i) => i.status === 'resolved').length;
-    return {
-      totalPatrols,
-      normalRate,
-      truantCount,
-      excusedCount,
-      incidentCount: filteredIncidents.length,
-      resolvedIncidents,
-    };
-  }, [filteredLogs, evaluatedAbsences, filteredIncidents]);
+  const effectiveSettings: SchoolSettings = useMemo(
+    () => ({
+      ...schoolSettings,
+      schoolName: schoolName.trim() || schoolSettings.schoolName,
+      academicYear: academicYear.trim() || schoolSettings.academicYear,
+      semester,
+      currentWeek: typeof weekNumber === 'number' ? weekNumber : schoolSettings.currentWeek,
+    }),
+    [schoolSettings, schoolName, academicYear, semester, weekNumber]
+  );
+
+  const handleExportWord = async () => {
+    setExportingWord(true);
+    try {
+      await exportPatrolWordDocx({
+        schoolSettings: effectiveSettings,
+        weekNumber,
+        startDate,
+        endDate,
+        rows: reportRows,
+        incidents: filteredIncidents,
+        includeIncidentsAppendix,
+      });
+      onActionFeedback('已產生並下載正式 Word 巡堂紀錄表（.docx）');
+    } catch (err) {
+      onActionFeedback(
+        `Word 匯出失敗：${err instanceof Error ? err.message : '請稍後再試'}`
+      );
+    } finally {
+      setExportingWord(false);
+    }
+  };
 
   const handleExportExcel = () => {
-    exportFullExcelWorkbook({
-      schoolName,
+    exportPatrolExcelWorkbook({
+      schoolSettings: effectiveSettings,
       startDate,
       endDate,
       patrolLogs: filteredLogs,
-      evaluatedAbsences,
-      studentSummaries,
       incidents: filteredIncidents,
     });
-    onActionFeedback('已匯出多工作表 Excel 報表（.xlsx）');
-  };
-
-  const handleExportCsv = () => {
-    if (template === 'truancy') {
-      exportCsvWithBom(
-        `${schoolName}_缺曠自動判別報表_${startDate}_${endDate}.csv`,
-        ['日期', '節次', '班級', '座號', '姓名', '科目', '任課教師', '自動判定', '風險等級', '依據'],
-        evaluatedAbsences.map((a) => [
-          a.date,
-          `第${a.period}節`,
-          a.className,
-          a.seatNumber,
-          a.studentName,
-          a.subject,
-          a.teacherName,
-          AUTO_ABSENCE_STATUS_LABELS[a.liveEval.autoStatus],
-          RISK_LEVEL_LABELS[a.liveEval.riskLevel],
-          a.liveEval.rationale,
-        ])
-      );
-    } else if (template === 'incidents') {
-      exportCsvWithBom(
-        `${schoolName}_異常事件通報報表_${startDate}_${endDate}.csv`,
-        ['日期', '節次', '嚴重度', '類別', '地點', '標題', '狀態', '通報人', '承辦人', '結案說明'],
-        filteredIncidents.map((i) => [
-          i.date,
-          `第${i.period}節`,
-          INCIDENT_SEVERITY_LABELS[i.severity],
-          INCIDENT_CATEGORY_LABELS[i.category],
-          i.location,
-          i.title,
-          INCIDENT_STATUS_LABELS[i.status],
-          i.reporterName,
-          i.handlerName || '尚未接手',
-          i.resolutionNote,
-        ])
-      );
-    } else {
-      exportCsvWithBom(
-        `${schoolName}_巡堂紀錄總表_${startDate}_${endDate}.csv`,
-        ['日期', '節次', '樓棟', '教室', '班級', '科目', '任課教師', '應到', '實到', '狀態', '備註', '巡堂人員'],
-        filteredLogs.map((l) => [
-          l.date,
-          `第${l.period}節`,
-          l.building,
-          l.roomNumber,
-          l.className,
-          l.subject,
-          l.teacherName,
-          l.expectedCount,
-          l.actualCount,
-          PATROL_STATUS_LABELS[l.status],
-          l.note,
-          l.inspectorName,
-        ])
-      );
-    }
-    onActionFeedback('已下載 UTF-8 BOM CSV 報表（支援 Excel 直接開啟無亂碼）');
+    onActionFeedback('已匯出巡堂紀錄 Excel 報表（.xlsx）');
   };
 
   const handlePrintPdf = () => {
     window.print();
   };
 
+  const weekDisplayText =
+    weekNumber !== '' && Number(weekNumber) > 0 ? ` ${weekNumber} ` : ' ______ ';
+
+  const glyph = (list: PatrolCheckItem[], key: PatrolCheckItem) =>
+    list.includes(key) ? '☑' : '☐';
+
   return (
     <div className="space-y-6">
       {/* Export Control Bar (Hidden when printing PDF) */}
-      <div className="no-print bg-white border border-[#E5E1D8] rounded-xl p-5 space-y-4">
+      <div className="no-print bg-white border border-[#E5E1D8] rounded-2xl p-5 space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
-            <h2 className="text-base font-bold text-[#1F2421]">PDF 與 Excel 報表匯出中心</h2>
+            <h2 className="text-base font-bold text-[#1F2421]">巡堂紀錄表匯出中心（Word / PDF）</h2>
             <p className="text-xs text-[#7C7A72] mt-0.5">
-              即時整合課表、巡堂紀錄、缺曠判別與異常結案資料，一鍵產生多工作表 Excel（.xlsx）或正式 A4 簽核 PDF
+              依學校正式巡堂紀錄表格式自動套印各班級檢核勾選與核章欄，支援下載 Microsoft Word（.docx）與 A4 列印／另存 PDF
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={handleExportExcel}
-              className="min-h-[42px] px-4 py-2 bg-[#1E5C4B] hover:bg-[#16473A] text-white text-xs sm:text-sm font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors"
+              onClick={handleExportWord}
+              disabled={exportingWord}
+              className="min-h-[42px] px-4 py-2 bg-[#1E5C4B] hover:bg-[#16473A] disabled:opacity-60 text-white text-xs sm:text-sm font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors"
             >
-              <FileSpreadsheet className="w-4 h-4" />
-              匯出多工作表 Excel (.xlsx)
-            </button>
-            <button
-              type="button"
-              onClick={handleExportCsv}
-              className="min-h-[42px] px-3.5 py-2 bg-white hover:bg-[#FAF9F5] text-[#3A3F3B] border border-[#DDD8CD] text-xs sm:text-sm font-medium rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors"
-            >
-              <Download className="w-4 h-4" />
-              匯出 CSV
+              <FileDown className="w-4 h-4" />
+              {exportingWord ? '產生 Word 中...' : '下載 Word (.docx)'}
             </button>
             <button
               type="button"
               onClick={handlePrintPdf}
-              className="min-h-[42px] px-4 py-2 bg-[#1F2421] hover:bg-[#313834] text-white text-xs sm:text-sm font-medium rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors"
+              className="min-h-[42px] px-4 py-2 bg-[#1F2421] hover:bg-[#313834] text-white text-xs sm:text-sm font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors"
             >
               <Printer className="w-4 h-4" />
               列印／另存 PDF
             </button>
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              className="min-h-[42px] px-3.5 py-2 bg-white hover:bg-[#FAF9F5] text-[#3A3F3B] border border-[#DDD8CD] text-xs sm:text-sm font-medium rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              匯出 Excel
+            </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-3 border-t border-[#F0ECE3] text-xs">
+        {/* Report Metadata & Filters */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 pt-3 border-t border-[#F0ECE3] text-xs">
           <div>
-            <label className="font-semibold text-[#5C615C] block mb-1">報表抬頭校名</label>
+            <label className="font-semibold text-[#5C615C] block mb-1">學校名稱</label>
             <input
               type="text"
               value={schoolName}
@@ -216,13 +198,53 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               className="w-full min-h-[38px] px-3 border border-[#E5E1D8] rounded-lg bg-[#FAF9F5] focus:outline-none focus:border-[#1E5C4B]"
             />
           </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="font-semibold text-[#5C615C] block mb-1">學年度</label>
+              <input
+                type="text"
+                value={academicYear}
+                onChange={(e) => setAcademicYear(e.target.value)}
+                className="w-full min-h-[38px] px-2.5 border border-[#E5E1D8] rounded-lg bg-[#FAF9F5] font-mono-num focus:outline-none focus:border-[#1E5C4B]"
+              />
+            </div>
+            <div>
+              <label className="font-semibold text-[#5C615C] block mb-1">週次</label>
+              <input
+                type="number"
+                min={1}
+                max={25}
+                value={weekNumber}
+                placeholder="空白"
+                onChange={(e) =>
+                  setWeekNumber(
+                    e.target.value === ''
+                      ? ''
+                      : Math.max(1, Math.min(25, Number(e.target.value) || 1))
+                  )
+                }
+                className="w-full min-h-[38px] px-2.5 border border-[#E5E1D8] rounded-lg bg-[#FAF9F5] font-mono-num focus:outline-none focus:border-[#1E5C4B]"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="font-semibold text-[#5C615C] block mb-1">學期</label>
+            <select
+              value={semester}
+              onChange={(e) => setSemester(e.target.value as SemesterType)}
+              className="w-full min-h-[38px] px-2.5 border border-[#E5E1D8] rounded-lg bg-[#FAF9F5] focus:outline-none focus:border-[#1E5C4B]"
+            >
+              <option value="第一學期">第一學期</option>
+              <option value="第二學期">第二學期</option>
+            </select>
+          </div>
           <div>
             <label className="font-semibold text-[#5C615C] block mb-1">起始日期</label>
             <input
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="w-full min-h-[38px] px-3 border border-[#E5E1D8] rounded-lg bg-[#FAF9F5] font-mono-num focus:outline-none focus:border-[#1E5C4B]"
+              className="w-full min-h-[38px] px-2.5 border border-[#E5E1D8] rounded-lg bg-[#FAF9F5] font-mono-num focus:outline-none focus:border-[#1E5C4B]"
             />
           </div>
           <div>
@@ -231,7 +253,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="w-full min-h-[38px] px-3 border border-[#E5E1D8] rounded-lg bg-[#FAF9F5] font-mono-num focus:outline-none focus:border-[#1E5C4B]"
+              className="w-full min-h-[38px] px-2.5 border border-[#E5E1D8] rounded-lg bg-[#FAF9F5] font-mono-num focus:outline-none focus:border-[#1E5C4B]"
             />
           </div>
           <div>
@@ -239,233 +261,225 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             <select
               value={buildingFilter}
               onChange={(e) => setBuildingFilter(e.target.value)}
-              className="w-full min-h-[38px] px-3 border border-[#E5E1D8] rounded-lg bg-[#FAF9F5] focus:outline-none focus:border-[#1E5C4B]"
+              className="w-full min-h-[38px] px-2.5 border border-[#E5E1D8] rounded-lg bg-[#FAF9F5] focus:outline-none focus:border-[#1E5C4B]"
             >
               {buildings.map((b) => (
-                <option key={b} value={b}>{b === 'ALL' ? '全校所有樓棟' : b}</option>
+                <option key={b} value={b}>
+                  {b === 'ALL' ? '全校所有樓棟' : b}
+                </option>
               ))}
             </select>
           </div>
-          <div>
-            <label className="font-semibold text-[#5C615C] block mb-1">PDF 預覽版型</label>
-            <select
-              value={template}
-              onChange={(e) => setTemplate(e.target.value as ReportTemplate)}
-              className="w-full min-h-[38px] px-3 border border-[#E5E1D8] rounded-lg bg-[#FAF9F5] focus:outline-none focus:border-[#1E5C4B]"
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#F0ECE3] text-xs">
+          <div className="inline-flex items-center gap-1 p-1 bg-[#F2EFE9] rounded-xl">
+            <button
+              type="button"
+              onClick={() => setReportMode('weekly_standard')}
+              className={`min-h-[34px] px-3 py-1 rounded-lg font-semibold transition-colors cursor-pointer ${
+                reportMode === 'weekly_standard'
+                  ? 'bg-[#1E5C4B] text-white shadow-xs'
+                  : 'text-[#5C615C] hover:text-[#1F2421]'
+              }`}
             >
-              <option value="comprehensive">綜合巡堂與缺曠總表</option>
-              <option value="truancy">缺曠課自動判別專表</option>
-              <option value="incidents">異常事件處置報告</option>
-            </select>
+              標準各年級巡堂表（含空列）
+            </button>
+            <button
+              type="button"
+              onClick={() => setReportMode('logged_only')}
+              className={`min-h-[34px] px-3 py-1 rounded-lg font-semibold transition-colors cursor-pointer ${
+                reportMode === 'logged_only'
+                  ? 'bg-[#1E5C4B] text-white shadow-xs'
+                  : 'text-[#5C615C] hover:text-[#1F2421]'
+              }`}
+            >
+              僅列出已巡堂紀錄（{filteredLogs.length} 筆）
+            </button>
           </div>
+
+          <label className="inline-flex items-center gap-2 text-[#3A3F3B] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={includeIncidentsAppendix}
+              onChange={(e) => setIncludeIncidentsAppendix(e.target.checked)}
+              className="w-4 h-4 accent-[#1E5C4B]"
+            />
+            <span>附加異常事件通報清冊（區間內 {filteredIncidents.length} 件）</span>
+          </label>
         </div>
       </div>
 
-      {/* Live Formal A4 Printable School Report Preview */}
-      <article className="print-surface bg-white border border-[#E5E1D8] rounded-xl p-6 sm:p-10 max-w-5xl mx-auto space-y-8">
-        {/* Official Report Header */}
-        <header className="border-b-2 border-slate-900 pb-4 flex flex-col sm:flex-row sm:items-end justify-between gap-2">
-          <div>
-            <p className="text-xs text-slate-500 flex items-center gap-1.5">
-              <FileText className="w-3.5 h-3.5 no-print" />
-              學務處日常教學巡堂正式統計報告
-            </p>
-            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 mt-1">
-              {schoolName} — {template === 'truancy' ? '學生缺曠自動判別明細表' : template === 'incidents' ? '校園巡堂異常通報結案報告' : '課堂巡堂與出缺勤統計總表'}
-            </h1>
-          </div>
-          <div className="text-xs text-slate-600 font-mono-num sm:text-right space-y-0.5">
-            <p>統計區間：{startDate} 至 {endDate}</p>
-            <p>涵蓋範圍：{buildingFilter === 'ALL' ? '全校樓棟' : buildingFilter}</p>
-          </div>
-        </header>
+      {/* Live Formal A4 Printable School Patrol Form (Matches Official Word Template) */}
+      <article className="print-surface bg-white border border-[#E5E1D8] rounded-2xl p-5 sm:p-10 max-w-4xl mx-auto">
+        <div className="font-serif text-black space-y-4">
+          {/* Official Centered Title */}
+          <h1 className="text-center text-xl sm:text-2xl font-bold tracking-wider text-black">
+            {effectiveSettings.schoolName} {effectiveSettings.academicYear} 學年度
+            {effectiveSettings.semester}第{weekDisplayText}週 巡堂紀錄表
+          </h1>
 
-        {/* Executive Summary Strip */}
-        <section className="grid grid-cols-2 sm:grid-cols-4 gap-4 border border-slate-200 rounded-lg p-4">
-          <div>
-            <p className="text-xs text-slate-500">累計巡堂班次</p>
-            <p className="text-lg font-bold font-mono-num text-slate-900 mt-0.5">
-              {summaryStats.totalPatrols} 次
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-slate-500">課堂正常運作率</p>
-            <p className="text-lg font-bold font-mono-num text-slate-900 mt-0.5">
-              {summaryStats.normalRate}%
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-slate-500">自動判定曠課／核假</p>
-            <p className="text-lg font-bold font-mono-num text-slate-900 mt-0.5">
-              {summaryStats.truantCount} / {summaryStats.excusedCount} 人次
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-slate-500">異常通報（已結案）</p>
-            <p className="text-lg font-bold font-mono-num text-slate-900 mt-0.5">
-              {summaryStats.incidentCount} 件（{summaryStats.resolvedIncidents}）
-            </p>
-          </div>
-        </section>
+          {/* Official Formal Black-Bordered Table */}
+          {reportRows.length === 0 ? (
+            <div className="border border-black p-10 text-center text-sm text-neutral-600">
+              所選日期區間（{startDate} 至 {endDate}）尚無已登錄之巡堂紀錄，可切換為「標準各年級巡堂表」列印空白表單。
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse border border-black text-[13px] leading-snug text-black">
+                <thead>
+                  <tr>
+                    <th className="border border-black py-1.5 px-2 text-center font-bold w-[13%]">
+                      班別
+                    </th>
+                    <th className="border border-black py-1.5 px-2 text-center font-bold w-[17%]">
+                      授課教師姓名
+                    </th>
+                    <th className="border border-black py-1.5 px-2 text-center font-bold w-[14%]">
+                      授課領域
+                    </th>
+                    <th
+                      rowSpan={2}
+                      className="border border-black py-1.5 px-3 text-center font-bold w-[56%]"
+                    >
+                      巡堂結果紀錄
+                    </th>
+                  </tr>
+                  <tr>
+                    <th className="border border-black py-1.5 px-2 text-center font-bold">日期</th>
+                    <th className="border border-black py-1.5 px-2 text-center font-bold">星期</th>
+                    <th className="border border-black py-1.5 px-2 text-center font-bold">節次</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reportRows.map((row) => {
+                    const hasNote = row.note.trim().length > 0;
+                    return (
+                      <React.Fragment key={row.key}>
+                        {/* Row A: Class / Teacher / Subject / 8 Checkboxes */}
+                        <tr>
+                          <td className="border border-black py-2 px-1.5 text-center font-bold align-middle">
+                            <div>{row.classLabel}</div>
+                            {row.subClassLabel && (
+                              <div className="text-xs font-normal mt-0.5">
+                                （{row.subClassLabel}）
+                              </div>
+                            )}
+                          </td>
+                          <td className="border border-black py-2 px-1.5 text-center align-middle">
+                            {row.teacherName}
+                          </td>
+                          <td className="border border-black py-2 px-1.5 text-center align-middle">
+                            {row.subject}
+                          </td>
+                          <td className="border border-black py-2 px-3 align-middle">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1">
+                              <span>{glyph(row.checklist, 'class_normal')}上課大致正常</span>
+                              <span>{glyph(row.checklist, 'proper_equipment')}妥善運用教學設備</span>
+                              <span>{glyph(row.checklist, 'student_focused')}學生專注上課</span>
+                              <span>{glyph(row.checklist, 'good_interaction')}師生互動良好</span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 mt-1.5 pt-1.5 border-t border-black/30">
+                              <span>{glyph(row.checklist, 'teacher_late')}教師未準時上課</span>
+                              <span>{glyph(row.checklist, 'poor_order')}班級秩序欠佳</span>
+                              <span>{glyph(row.checklist, 'poor_learning')}學生學習狀況差</span>
+                              <span>
+                                {glyph(row.checklist, 'off_schedule_no_change')}未按課表上課且無調課
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                        {/* Row B: Date / Weekday / Period / 其他 */}
+                        <tr>
+                          <td className="border border-black py-1.5 px-1.5 text-center font-mono-num align-middle h-9">
+                            {row.dateDisplay}
+                          </td>
+                          <td className="border border-black py-1.5 px-1.5 text-center align-middle">
+                            {row.weekdayDisplay}
+                          </td>
+                          <td className="border border-black py-1.5 px-1.5 text-center font-mono-num align-middle">
+                            {row.periodDisplay}
+                          </td>
+                          <td className="border border-black py-1.5 px-3 align-middle">
+                            <span>{hasNote ? '☑' : '☐'} 其他：</span>
+                            {hasNote && <span className="ml-1">{row.note}</span>}
+                          </td>
+                        </tr>
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
 
-        {/* Section 1: Patrol Logs Table */}
-        {(template === 'comprehensive') && (
-          <section className="space-y-2.5">
-            <h3 className="text-sm font-bold text-slate-900">一、各班級巡堂檢核紀錄</h3>
-            {filteredLogs.length === 0 ? (
-              <p className="text-xs text-slate-500 py-3">所選區間內無巡堂紀錄。</p>
-            ) : (
+          {/* Official Signature Line (Matches Screenshots 2 & 3) */}
+          <footer className="pt-4 grid grid-cols-3 gap-4 text-sm sm:text-base font-bold text-black">
+            <div>巡堂人員：</div>
+            <div>教務主任：</div>
+            <div>校長：</div>
+          </footer>
+
+          {/* Optional Incident Appendix in Print/PDF */}
+          {includeIncidentsAppendix && filteredIncidents.length > 0 && (
+            <section className="pt-8 mt-6 border-t border-black/40 space-y-3">
+              <h2 className="text-center text-lg font-bold text-black">
+                附錄：{effectiveSettings.schoolName} 巡堂異常事件通報與處置清冊（{startDate} 至{' '}
+                {endDate}）
+              </h2>
               <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
+                <table className="w-full border-collapse border border-black text-xs text-black">
                   <thead>
-                    <tr className="border-y border-slate-300 bg-slate-50 text-slate-700">
-                      <th className="py-2 px-2.5">日期／節次</th>
-                      <th className="py-2 px-2.5">班級／教室</th>
-                      <th className="py-2 px-2.5">科目／教師</th>
-                      <th className="py-2 px-2.5 text-right">實到／應到</th>
-                      <th className="py-2 px-2.5">巡堂狀態</th>
-                      <th className="py-2 px-2.5">巡堂人員</th>
-                      <th className="py-2 px-2.5">備註</th>
+                    <tr>
+                      <th className="border border-black py-1.5 px-2 text-center font-bold">
+                        日期／節次
+                      </th>
+                      <th className="border border-black py-1.5 px-2 text-center font-bold">
+                        等級／類別
+                      </th>
+                      <th className="border border-black py-1.5 px-2 text-center font-bold">
+                        地點與班級
+                      </th>
+                      <th className="border border-black py-1.5 px-2 text-center font-bold">
+                        事件標題與說明
+                      </th>
+                      <th className="border border-black py-1.5 px-2 text-center font-bold">
+                        處理狀態與結案
+                      </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {filteredLogs.map((log) => (
-                      <tr key={log.id}>
-                        <td className="py-2 px-2.5 font-mono-num whitespace-nowrap">
-                          {log.date} 第{log.period}節
-                        </td>
-                        <td className="py-2 px-2.5 whitespace-nowrap font-medium">
-                          {log.className}（{log.roomNumber}）
-                        </td>
-                        <td className="py-2 px-2.5 whitespace-nowrap">
-                          {log.subject} · {log.teacherName}
-                        </td>
-                        <td className="py-2 px-2.5 text-right font-mono-num">
-                          {log.actualCount} / {log.expectedCount}
-                        </td>
-                        <td className="py-2 px-2.5 whitespace-nowrap">
-                          {PATROL_STATUS_LABELS[log.status]}
-                        </td>
-                        <td className="py-2 px-2.5 whitespace-nowrap">{log.inspectorName}</td>
-                        <td className="py-2 px-2.5 text-slate-600">{log.note || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        )}
-
-        {/* Section 2: Truancy Summary */}
-        {(template === 'comprehensive' || template === 'truancy') && (
-          <section className="space-y-2.5">
-            <h3 className="text-sm font-bold text-slate-900">
-              {template === 'comprehensive' ? '二、學生缺曠自動判別與風險名單' : '一、學生缺曠自動判別明細表'}
-            </h3>
-            {evaluatedAbsences.length === 0 ? (
-              <p className="text-xs text-slate-500 py-3">所選區間內無缺曠課紀錄。</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="border-y border-slate-300 bg-slate-50 text-slate-700">
-                      <th className="py-2 px-2.5">日期／節次</th>
-                      <th className="py-2 px-2.5">班級／學生</th>
-                      <th className="py-2 px-2.5">課表科目</th>
-                      <th className="py-2 px-2.5">系統自動判定</th>
-                      <th className="py-2 px-2.5">風險分級</th>
-                      <th className="py-2 px-2.5">判別依據</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {evaluatedAbsences.map((a) => (
-                      <tr key={a.id}>
-                        <td className="py-2 px-2.5 font-mono-num whitespace-nowrap">
-                          {a.date} 第{a.period}節
-                        </td>
-                        <td className="py-2 px-2.5 whitespace-nowrap font-medium">
-                          {a.className} {a.seatNumber}號 {a.studentName}
-                        </td>
-                        <td className="py-2 px-2.5 whitespace-nowrap">
-                          {a.subject}（{a.teacherName}）
-                        </td>
-                        <td className="py-2 px-2.5 whitespace-nowrap font-semibold">
-                          {AUTO_ABSENCE_STATUS_LABELS[a.liveEval.autoStatus]}
-                        </td>
-                        <td className="py-2 px-2.5 whitespace-nowrap">
-                          {RISK_LEVEL_LABELS[a.liveEval.riskLevel]}
-                        </td>
-                        <td className="py-2 px-2.5 text-slate-600">{a.liveEval.rationale}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        )}
-
-        {/* Section 3: Incidents Table */}
-        {(template === 'comprehensive' || template === 'incidents') && (
-          <section className="space-y-2.5">
-            <h3 className="text-sm font-bold text-slate-900">
-              {template === 'comprehensive' ? '三、異常事件通報與處置紀錄' : '一、異常事件通報與結案清冊'}
-            </h3>
-            {filteredIncidents.length === 0 ? (
-              <p className="text-xs text-slate-500 py-3">所選區間內無異常事件通報。</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="border-y border-slate-300 bg-slate-50 text-slate-700">
-                      <th className="py-2 px-2.5">日期／節次</th>
-                      <th className="py-2 px-2.5">等級／類別</th>
-                      <th className="py-2 px-2.5">地點與事件標題</th>
-                      <th className="py-2 px-2.5">處理狀態</th>
-                      <th className="py-2 px-2.5">承辦與結案說明</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
+                  <tbody>
                     {filteredIncidents.map((inc) => (
                       <tr key={inc.id}>
-                        <td className="py-2 px-2.5 font-mono-num whitespace-nowrap">
-                          {inc.date} 第{inc.period}節
+                        <td className="border border-black py-1.5 px-2 text-center font-mono-num whitespace-nowrap">
+                          {inc.date}
+                          <br />第 {inc.period} 節
                         </td>
-                        <td className="py-2 px-2.5 whitespace-nowrap">
-                          {INCIDENT_SEVERITY_LABELS[inc.severity]} · {INCIDENT_CATEGORY_LABELS[inc.category]}
+                        <td className="border border-black py-1.5 px-2 text-center whitespace-nowrap">
+                          {INCIDENT_SEVERITY_LABELS[inc.severity]}
+                          <br />
+                          {INCIDENT_CATEGORY_LABELS[inc.category]}
                         </td>
-                        <td className="py-2 px-2.5">
-                          <span className="font-medium text-slate-900">{inc.title}</span>
-                          <span className="block text-slate-500">{inc.location}</span>
+                        <td className="border border-black py-1.5 px-2">{inc.location}</td>
+                        <td className="border border-black py-1.5 px-2">
+                          <div className="font-bold">{inc.title}</div>
+                          <div>{inc.description}</div>
                         </td>
-                        <td className="py-2 px-2.5 whitespace-nowrap">
-                          {INCIDENT_STATUS_LABELS[inc.status]}
-                        </td>
-                        <td className="py-2 px-2.5 text-slate-600">
-                          {inc.handlerName ? `${inc.handlerName}：` : ''}
-                          {inc.resolutionNote || '尚未填寫結案說明'}
+                        <td className="border border-black py-1.5 px-2">
+                          <div className="font-bold">{INCIDENT_STATUS_LABELS[inc.status]}</div>
+                          <div>
+                            {inc.handlerName ? `${inc.handlerName}：` : ''}
+                            {inc.resolutionNote || '尚未填寫結案說明'}
+                          </div>
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            )}
-          </section>
-        )}
-
-        {/* Formal Taiwanese School Approval Signature Block */}
-        <footer className="pt-8 border-t border-slate-300">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 text-xs text-slate-700">
-            {['值日巡堂人員', '生教組長', '學務主任', '校長'].map((roleTitle) => (
-              <div key={roleTitle} className="space-y-8">
-                <p className="font-semibold text-slate-800">{roleTitle}核章：</p>
-                <div className="border-b border-slate-400" />
-              </div>
-            ))}
-          </div>
-        </footer>
+            </section>
+          )}
+        </div>
       </article>
     </div>
   );

@@ -10,12 +10,11 @@ import {
   AlertTriangle,
   Bell,
   BookOpen,
-  CalendarCheck,
+  Building2,
   Check,
   ClipboardCheck,
-  FileSpreadsheet,
+  FileText,
   LayoutDashboard,
-  ShieldAlert,
   UserRound,
   X,
 } from 'lucide-react';
@@ -23,19 +22,19 @@ import {
   BOOTSTRAP_ADMIN_EMAIL,
   CAMPUS_ID,
   DAY_OF_WEEK_LABELS,
+  DEFAULT_SCHOOL_SETTINGS,
   detectCurrentPeriod,
   getDayOfWeekFromDate,
   getTodayDateString,
   INCIDENT_SEVERITY_LABELS,
   normalizeStaffRole,
   STAFF_ROLE_LABELS,
-  type AbsenceRecord,
   type AllowedAccount,
   type IncidentReport,
-  type LeaveRecord,
   type NavSection,
   type NotificationPreferences,
   type PatrolLog,
+  type SchoolSettings,
   type StaffProfile,
   type TimetableSlot,
 } from './types/patrol';
@@ -61,7 +60,8 @@ import { AccessBlockedScreen, SignInScreen } from './components/SignInScreen';
 import { DashboardView } from './components/DashboardView';
 import { PatrolWorkspaceView } from './components/PatrolWorkspaceView';
 import { IncidentsView } from './components/IncidentsView';
-import { TimetableTruancyView, type TimetableSubTab } from './components/TimetableTruancyView';
+import { BasicDataView } from './components/BasicDataView';
+import { TimetableTruancyView } from './components/TimetableTruancyView';
 import { ReportsView } from './components/ReportsView';
 import { StaffView } from './components/StaffView';
 import { OfflineBanner, PWAInstallButton } from './components/PWAInstallButton';
@@ -69,7 +69,6 @@ import { OfflineBanner, PWAInstallButton } from './components/PWAInstallButton';
 interface SidebarNavItem {
   key: string;
   nav: NavSection;
-  subTab?: TimetableSubTab;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   badgeBg: string;
@@ -116,17 +115,15 @@ function CampusPatrolApp() {
 
   // Navigation & Shared Time Context
   const [activeNav, setActiveNav] = useState<NavSection>('dashboard');
-  const [timetableSubTab, setTimetableSubTab] = useState<TimetableSubTab>('truancy');
   const [selectedDate, setSelectedDate] = useState<string>(getTodayDateString);
   const [selectedPeriod, setSelectedPeriod] = useState<number>(detectCurrentPeriod);
   const [selectedBuilding, setSelectedBuilding] = useState<string>('ALL');
   const [quickPatrolSlot, setQuickPatrolSlot] = useState<TimetableSlot | null>(null);
 
   // Real-time Firestore Collections
+  const [schoolSettings, setSchoolSettings] = useState<SchoolSettings>(DEFAULT_SCHOOL_SETTINGS);
   const [timetables, setTimetables] = useState<TimetableSlot[]>([]);
-  const [leaveRecords, setLeaveRecords] = useState<LeaveRecord[]>([]);
   const [patrolLogs, setPatrolLogs] = useState<PatrolLog[]>([]);
-  const [absences, setAbsences] = useState<AbsenceRecord[]>([]);
   const [incidents, setIncidents] = useState<IncidentReport[]>([]);
   const [staffList, setStaffList] = useState<StaffProfile[]>([]);
   const [allowedAccounts, setAllowedAccounts] = useState<AllowedAccount[]>([]);
@@ -152,10 +149,9 @@ function CampusPatrolApp() {
   }, [feedbackBanner]);
 
   const clearOperationalData = useCallback(() => {
+    setSchoolSettings(DEFAULT_SCHOOL_SETTINGS);
     setTimetables([]);
-    setLeaveRecords([]);
     setPatrolLogs([]);
-    setAbsences([]);
     setIncidents([]);
     setStaffList([]);
     setAllowedAccounts([]);
@@ -299,12 +295,39 @@ function CampusPatrolApp() {
       return;
     }
 
+    const settingsDocRef = doc(db, 'schoolSettings', CAMPUS_ID);
     const qTimetables = query(collectionRefs.timetables(), where('campusId', '==', CAMPUS_ID));
-    const qLeaves = query(collectionRefs.leaveRecords(), where('campusId', '==', CAMPUS_ID));
     const qPatrols = query(collectionRefs.patrolLogs(), where('campusId', '==', CAMPUS_ID));
-    const qAbsences = query(collectionRefs.absences(), where('campusId', '==', CAMPUS_ID));
     const qIncidents = query(collectionRefs.incidents(), where('campusId', '==', CAMPUS_ID));
     const qStaff = query(collectionRefs.staffProfiles(), where('campusId', '==', CAMPUS_ID));
+
+    const unsubSettings = onSnapshot(
+      settingsDocRef,
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as Partial<SchoolSettings>;
+          setSchoolSettings({
+            campusId: CAMPUS_ID,
+            schoolName: data.schoolName || DEFAULT_SCHOOL_SETTINGS.schoolName,
+            academicYear: data.academicYear || DEFAULT_SCHOOL_SETTINGS.academicYear,
+            semester: data.semester === '第二學期' ? '第二學期' : '第一學期',
+            currentWeek:
+              typeof data.currentWeek === 'number' && data.currentWeek >= 1
+                ? data.currentWeek
+                : DEFAULT_SCHOOL_SETTINGS.currentWeek,
+            buildings:
+              Array.isArray(data.buildings) && data.buildings.length > 0
+                ? data.buildings
+                : DEFAULT_SCHOOL_SETTINGS.buildings,
+            updatedBy: data.updatedBy,
+            updatedAt: data.updatedAt,
+          });
+        } else {
+          setSchoolSettings(DEFAULT_SCHOOL_SETTINGS);
+        }
+      },
+      (error) => handleFirestoreError(error, OperationType.GET, `schoolSettings/${CAMPUS_ID}`)
+    );
 
     const unsubTimetables = onSnapshot(
       qTimetables,
@@ -316,16 +339,6 @@ function CampusPatrolApp() {
       (error) => handleFirestoreError(error, OperationType.LIST, 'timetables')
     );
 
-    const unsubLeaves = onSnapshot(
-      qLeaves,
-      (snap) => {
-        setLeaveRecords(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<LeaveRecord, 'id'>) }))
-        );
-      },
-      (error) => handleFirestoreError(error, OperationType.LIST, 'leaveRecords')
-    );
-
     const unsubPatrols = onSnapshot(
       qPatrols,
       (snap) => {
@@ -334,16 +347,6 @@ function CampusPatrolApp() {
         );
       },
       (error) => handleFirestoreError(error, OperationType.LIST, 'patrolLogs')
-    );
-
-    const unsubAbsences = onSnapshot(
-      qAbsences,
-      (snap) => {
-        setAbsences(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AbsenceRecord, 'id'>) }))
-        );
-      },
-      (error) => handleFirestoreError(error, OperationType.LIST, 'absences')
     );
 
     const unsubIncidents = onSnapshot(
@@ -393,10 +396,9 @@ function CampusPatrolApp() {
     );
 
     return () => {
+      unsubSettings();
       unsubTimetables();
-      unsubLeaves();
       unsubPatrols();
-      unsubAbsences();
       unsubIncidents();
       unsubStaff();
     };
@@ -461,10 +463,11 @@ function CampusPatrolApp() {
       const res = await seedCampusDemoDataset({
         uid: profile.uid,
         displayName: profile.displayName,
+        schoolSettings,
       });
       setSelectedPeriod(1);
       showFeedback(
-        `已匯入 ${res.timetableCount} 筆學校課表、${res.patrolCount} 筆巡堂紀錄、${res.absenceCount} 筆缺曠測試資料與 ${res.incidentCount} 件異常通報`
+        `已匯入 ${res.timetableCount} 筆班級課表、${res.patrolCount} 筆巡堂檢核紀錄與 ${res.incidentCount} 件異常通報`
       );
     } finally {
       setSeeding(false);
@@ -517,14 +520,13 @@ function CampusPatrolApp() {
         ],
       },
       {
-        title: '課務與出缺勤',
+        title: '基本資料',
         items: [
           {
-            key: 'truancy',
-            nav: 'timetable',
-            subTab: 'truancy',
-            label: '自動缺曠判別',
-            icon: ShieldAlert,
+            key: 'basic_data',
+            nav: 'basic_data',
+            label: '學校與樓棟設定',
+            icon: Building2,
             badgeBg: 'bg-[#FBF0E2]',
             badgeText: 'text-[#9A5B13]',
             activeRowBg: 'bg-[#FBF0E2]',
@@ -534,26 +536,13 @@ function CampusPatrolApp() {
           {
             key: 'timetable',
             nav: 'timetable',
-            subTab: 'timetable',
-            label: '學校課表資料庫',
+            label: '班級課表管理',
             icon: BookOpen,
             badgeBg: 'bg-[#E7F0F8]',
             badgeText: 'text-[#245A84]',
             activeRowBg: 'bg-[#E7F0F8]',
             activeText: 'text-[#245A84]',
             activeBadgeBg: 'bg-[#245A84]',
-          },
-          {
-            key: 'leaves',
-            nav: 'timetable',
-            subTab: 'leaves',
-            label: '核准假單核銷',
-            icon: CalendarCheck,
-            badgeBg: 'bg-[#EBF4E8]',
-            badgeText: 'text-[#2E6B32]',
-            activeRowBg: 'bg-[#EBF4E8]',
-            activeText: 'text-[#2E6B32]',
-            activeBadgeBg: 'bg-[#2E6B32]',
           },
         ],
       },
@@ -563,8 +552,8 @@ function CampusPatrolApp() {
           {
             key: 'reports',
             nav: 'reports',
-            label: '報表匯出',
-            icon: FileSpreadsheet,
+            label: '巡堂報表匯出',
+            icon: FileText,
             badgeBg: 'bg-[#E9ECF7]',
             badgeText: 'text-[#354488]',
             activeRowBg: 'bg-[#E9ECF7]',
@@ -593,8 +582,8 @@ function CampusPatrolApp() {
       { id: 'dashboard', label: '儀表板', icon: LayoutDashboard },
       { id: 'patrol', label: '巡堂', icon: ClipboardCheck },
       { id: 'incidents', label: '通報', icon: Bell },
-      { id: 'timetable', label: '缺曠', icon: BookOpen },
-      { id: 'reports', label: '報表', icon: FileSpreadsheet },
+      { id: 'basic_data', label: '基本資料', icon: Building2 },
+      { id: 'reports', label: '報表', icon: FileText },
       { id: 'staff', label: '帳號', icon: UserRound },
     ],
     []
@@ -651,9 +640,9 @@ function CampusPatrolApp() {
 
   return (
     <div className="min-h-screen bg-[#F6F4EE] text-[#1F2421] flex flex-col">
-      {/* Unified Full-Width Top Header Bar (Matches Reference School System UX) */}
+      {/* Unified Full-Width Top Header Bar */}
       <header className="no-print sticky top-0 z-30 pt-safe min-h-[56px] lg:h-[68px] bg-white border-b border-[#E5E1D8] px-3.5 sm:px-6 flex items-center justify-between gap-3">
-        {/* Left: Emblem + System Title + Contextual Status Callout */}
+        {/* Left: Emblem + School System Title + Contextual Status */}
         <div className="flex items-center gap-3 sm:gap-4 min-w-0">
           <button
             type="button"
@@ -666,7 +655,7 @@ function CampusPatrolApp() {
               </span>
             </span>
             <span className="text-[15px] sm:text-lg font-bold tracking-tight text-[#1F2421] group-hover:text-[#1E5C4B] transition-colors whitespace-nowrap">
-              校園即時巡堂系統
+              {schoolSettings.schoolName}教學巡堂系統
             </span>
           </button>
 
@@ -683,18 +672,21 @@ function CampusPatrolApp() {
             </button>
           ) : (
             <span className="hidden xl:inline-flex items-center gap-1.5 text-xs text-[#7C7A72] font-mono-num whitespace-nowrap">
-              <span>{selectedDate}</span>
+              <span>
+                {schoolSettings.academicYear}學年度{schoolSettings.semester}
+              </span>
               <span aria-hidden="true">·</span>
-              <span>{selectedDayLabel}</span>
+              <span>第{schoolSettings.currentWeek}週</span>
               <span aria-hidden="true">·</span>
-              <span className="text-[#1E5C4B] font-semibold">第 {selectedPeriod} 節巡堂中</span>
+              <span>
+                {selectedDate}（{selectedDayLabel}）
+              </span>
             </span>
           )}
         </div>
 
         {/* Right: Quick-Period Segmented Switcher + PWA Install + User Profile & Logout */}
         <div className="flex items-center gap-2.5 sm:gap-4 shrink-0">
-          {/* Quick Period Segmented Pill (Warm Sand Track + Deep Forest Active) */}
           <div
             role="group"
             aria-label="快速切換巡堂節次"
@@ -723,7 +715,6 @@ function CampusPatrolApp() {
             <PWAInstallButton variant="compact" />
           </div>
 
-          {/* Mobile Urgent Shortcut if High Incidents Exist */}
           {openHighIncidentCount > 0 && activeNav !== 'incidents' && (
             <button
               type="button"
@@ -736,7 +727,7 @@ function CampusPatrolApp() {
             </button>
           )}
 
-          {/* User Avatar + Name + Role · Logout (Directly Matching Reference Header) */}
+          {/* User Avatar + Name + Role · Logout */}
           <div className="flex items-center gap-2.5 shrink-0">
             <button
               type="button"
@@ -779,33 +770,21 @@ function CampusPatrolApp() {
 
       {/* Body Layout: Warm Ivory Grouped Left Sidebar + Warm Linen Workspace */}
       <div className="flex-1 flex min-w-0">
-        {/* Desktop Grouped Sidebar (248px, Warm Ivory #FAF9F5) */}
+        {/* Desktop Grouped Sidebar */}
         <aside className="no-print hidden lg:flex lg:flex-col lg:w-[248px] lg:fixed lg:top-[68px] lg:bottom-0 lg:left-0 bg-[#FAF9F5] border-r border-[#E5E1D8] z-20">
-          <nav
-            aria-label="主功能選單"
-            className="flex-1 px-3 py-4 space-y-5 overflow-y-auto"
-          >
+          <nav aria-label="主功能選單" className="flex-1 px-3 py-4 space-y-5 overflow-y-auto">
             {sidebarGroups.map((group) => (
               <div key={group.title} className="space-y-1">
-                <p className="px-3 pb-1 text-xs font-medium text-[#9A968C]">
-                  {group.title}
-                </p>
+                <p className="px-3 pb-1 text-xs font-medium text-[#9A968C]">{group.title}</p>
                 {group.items.map((item) => {
                   const Icon = item.icon;
-                  const active = item.subTab
-                    ? activeNav === 'timetable' && timetableSubTab === item.subTab
-                    : activeNav === item.nav;
+                  const active = activeNav === item.nav;
 
                   return (
                     <button
                       key={item.key}
                       type="button"
-                      onClick={() => {
-                        setActiveNav(item.nav);
-                        if (item.subTab) {
-                          setTimetableSubTab(item.subTab);
-                        }
-                      }}
+                      onClick={() => setActiveNav(item.nav)}
                       className={`w-full min-h-[44px] px-2.5 py-1.5 rounded-xl text-[14px] flex items-center justify-between gap-2 transition-colors cursor-pointer whitespace-nowrap ${
                         active
                           ? `${item.activeRowBg} ${item.activeText} font-bold`
@@ -841,7 +820,7 @@ function CampusPatrolApp() {
             ))}
           </nav>
 
-          {/* Quiet Sidebar Footer with Real PWA Install Action */}
+          {/* Quiet Sidebar Footer with PWA Install Action */}
           <div className="px-4 py-3.5 border-t border-[#E5E1D8] space-y-2.5">
             <PWAInstallButton variant="sidebar" />
             <p className="text-center text-xs text-[#9A968C]">
@@ -851,8 +830,7 @@ function CampusPatrolApp() {
         </aside>
 
         {/* Main Content Area */}
-        <div className="flex-1 lg:pl-[248px] flex flex-col min-w-0">
-          {/* Live Push Notification Toast for Newly Triggered Incidents */}
+        <div className="flex-1 lg:pl-[248px] flex flex-col min-w-0 print:pl-0">
           {liveAlertToast && (
             <div className="no-print px-4 sm:px-6 pt-4">
               <div className="bg-[#FCECE6] border border-[#EABEB0] rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -860,7 +838,8 @@ function CampusPatrolApp() {
                   <AlertTriangle className="w-5 h-5 text-[#B44326] shrink-0 mt-0.5" />
                   <div className="text-xs sm:text-sm">
                     <p className="font-semibold text-[#7A2716]">
-                      即時推播通知｜{INCIDENT_SEVERITY_LABELS[liveAlertToast.severity]}：{liveAlertToast.title}
+                      即時推播通知｜{INCIDENT_SEVERITY_LABELS[liveAlertToast.severity]}：
+                      {liveAlertToast.title}
                     </p>
                     <p className="text-[#9E351E] mt-0.5">
                       {liveAlertToast.location} · 通報人：{liveAlertToast.reporterName}
@@ -891,7 +870,6 @@ function CampusPatrolApp() {
             </div>
           )}
 
-          {/* Action Feedback Toast */}
           {feedbackBanner && (
             <div className="no-print px-4 sm:px-6 pt-3">
               <div className="bg-[#1E5C4B] text-[#FAF9F5] text-xs sm:text-sm px-4 py-3 rounded-xl flex items-center justify-between gap-3">
@@ -908,10 +886,10 @@ function CampusPatrolApp() {
             </div>
           )}
 
-          {/* Active View Viewport (bottom padding on mobile clears fixed bottom tab bar) */}
-          <main className="flex-1 p-4 sm:p-6 pb-20 lg:pb-8 max-w-[1360px] w-full mx-auto">
+          <main className="flex-1 p-4 sm:p-6 pb-20 lg:pb-8 max-w-[1360px] w-full mx-auto print:p-0 print:max-w-none">
             {activeNav === 'dashboard' && (
               <DashboardView
+                schoolSettings={schoolSettings}
                 selectedDate={selectedDate}
                 selectedPeriod={selectedPeriod}
                 selectedBuilding={selectedBuilding}
@@ -920,19 +898,12 @@ function CampusPatrolApp() {
                 onChangeBuilding={setSelectedBuilding}
                 timetables={timetables}
                 patrolLogs={patrolLogs}
-                absences={absences}
-                leaveRecords={leaveRecords}
                 incidents={incidents}
                 onOpenQuickPatrol={(slot) => {
                   setQuickPatrolSlot(slot);
                   setActiveNav('patrol');
                 }}
-                onNavigate={(section) => {
-                  if (section === 'timetable') {
-                    setTimetableSubTab('truancy');
-                  }
-                  setActiveNav(section);
-                }}
+                onNavigate={setActiveNav}
                 onSeedDemoData={handleSeedDemoData}
                 seeding={seeding}
                 isAdmin={isAdmin}
@@ -942,13 +913,13 @@ function CampusPatrolApp() {
             {activeNav === 'patrol' && (
               <PatrolWorkspaceView
                 profile={profile}
+                schoolSettings={schoolSettings}
                 selectedDate={selectedDate}
                 selectedPeriod={selectedPeriod}
+                onChangeDate={setSelectedDate}
                 onChangePeriod={setSelectedPeriod}
                 timetables={timetables}
                 patrolLogs={patrolLogs}
-                absences={absences}
-                leaveRecords={leaveRecords}
                 activeSlot={quickPatrolSlot}
                 onSelectSlot={setQuickPatrolSlot}
                 onActionFeedback={showFeedback}
@@ -959,6 +930,7 @@ function CampusPatrolApp() {
               <IncidentsView
                 profile={profile}
                 isAdmin={isAdmin}
+                schoolSettings={schoolSettings}
                 selectedDate={selectedDate}
                 selectedPeriod={selectedPeriod}
                 timetables={timetables}
@@ -969,16 +941,46 @@ function CampusPatrolApp() {
               />
             )}
 
+            {activeNav === 'basic_data' && (
+              <BasicDataView
+                profile={profile}
+                isAdmin={isAdmin}
+                schoolSettings={schoolSettings}
+                timetables={timetables}
+                patrolLogs={patrolLogs}
+                onGoToTimetable={() => setActiveNav('timetable')}
+                onActionFeedback={showFeedback}
+              />
+            )}
+
             {activeNav === 'timetable' && (
               <TimetableTruancyView
                 profile={profile}
                 isAdmin={isAdmin}
-                selectedDate={selectedDate}
+                schoolSettings={schoolSettings}
                 timetables={timetables}
-                absences={absences}
-                leaveRecords={leaveRecords}
-                activeSubTab={timetableSubTab}
-                onChangeSubTab={setTimetableSubTab}
+                onGoToBasicData={() => setActiveNav('basic_data')}
+                onJumpToPatrol={(targetDayOfWeek, targetPeriod, slot) => {
+                  const parts = selectedDate.split('-').map(Number);
+                  const base =
+                    parts.length === 3 && !parts.some(Number.isNaN)
+                      ? new Date(parts[0], parts[1] - 1, parts[2])
+                      : new Date();
+                  const jsDay = base.getDay();
+                  const offsetToMon = jsDay === 0 ? -6 : 1 - jsDay;
+                  const targetDate = new Date(
+                    base.getFullYear(),
+                    base.getMonth(),
+                    base.getDate() + offsetToMon + (targetDayOfWeek - 1)
+                  );
+                  const y = targetDate.getFullYear();
+                  const m = String(targetDate.getMonth() + 1).padStart(2, '0');
+                  const d = String(targetDate.getDate()).padStart(2, '0');
+                  setSelectedDate(`${y}-${m}-${d}`);
+                  setSelectedPeriod(targetPeriod);
+                  setQuickPatrolSlot(slot ?? null);
+                  setActiveNav('patrol');
+                }}
                 onSeedDemoData={handleSeedDemoData}
                 seeding={seeding}
                 onActionFeedback={showFeedback}
@@ -987,11 +989,10 @@ function CampusPatrolApp() {
 
             {activeNav === 'reports' && (
               <ReportsView
+                schoolSettings={schoolSettings}
                 selectedDate={selectedDate}
                 timetables={timetables}
                 patrolLogs={patrolLogs}
-                absences={absences}
-                leaveRecords={leaveRecords}
                 incidents={incidents}
                 onActionFeedback={showFeedback}
               />
@@ -1014,7 +1015,7 @@ function CampusPatrolApp() {
 
       <OfflineBanner />
 
-      {/* Mobile Fixed Bottom Tab Bar (56px height + 56px top bar = 112px < 15% of 812px viewport) */}
+      {/* Mobile Fixed Bottom Tab Bar */}
       <nav
         aria-label="行動巡堂主選單"
         className="no-print lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#FAF9F5]/95 backdrop-blur-md border-t border-[#E5E1D8] pb-safe"
@@ -1022,7 +1023,9 @@ function CampusPatrolApp() {
         <div className="grid grid-cols-6 h-14">
           {mobileNavItems.map((item) => {
             const Icon = item.icon;
-            const active = activeNav === item.id;
+            const active =
+              activeNav === item.id ||
+              (item.id === 'basic_data' && activeNav === 'timetable');
             return (
               <button
                 key={item.id}
@@ -1033,9 +1036,7 @@ function CampusPatrolApp() {
                 }`}
               >
                 <Icon className="w-5 h-5" />
-                <span className="text-[10px] leading-tight whitespace-nowrap">
-                  {item.label}
-                </span>
+                <span className="text-[10px] leading-tight whitespace-nowrap">{item.label}</span>
                 {item.id === 'incidents' && openTotalIncidentCount > 0 && (
                   <span className="absolute top-1 right-2.5 text-[10px] font-mono-num font-bold text-[#B8432E]">
                     {openTotalIncidentCount}

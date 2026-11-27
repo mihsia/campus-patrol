@@ -45,13 +45,15 @@
 @media print {
   @page {
     size: A4 portrait;
-    margin: 14mm;
+    margin: 12mm;
   }
 
   body {
     background: #ffffff !important;
-    color: #0f172a !important;
-    font-size: 11pt;
+    color: #000000 !important;
+    font-size: 10.5pt;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   .no-print {
@@ -69,6 +71,11 @@
     margin: 0 !important;
     max-width: none !important;
     width: 100% !important;
+    border-radius: 0 !important;
+  }
+
+  .font-serif {
+    font-family: "DFKai-SB", "BiauKai", "標楷體", "Noto Serif TC", serif !important;
   }
 
   table {

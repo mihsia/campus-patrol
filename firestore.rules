@@ -90,6 +90,27 @@ service cloud.firestore {
         data.createdAt is timestamp;
     }
 
+    function isValidSchoolSettings(data, settingId) {
+      return data.keys().hasAll([
+          'campusId', 'schoolName', 'academicYear', 'semester', 'currentWeek',
+          'buildings', 'updatedBy', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'campusId', 'schoolName', 'academicYear', 'semester', 'currentWeek',
+          'buildings', 'updatedBy', 'updatedAt'
+        ]) &&
+        settingId == 'main-campus' &&
+        data.campusId == 'main-campus' &&
+        data.schoolName is string && data.schoolName.size() >= 1 && data.schoolName.size() <= 60 &&
+        data.academicYear is string && data.academicYear.size() >= 1 && data.academicYear.size() <= 10 &&
+        data.semester in ['第一學期', '第二學期'] &&
+        data.currentWeek is int && data.currentWeek >= 1 && data.currentWeek <= 25 &&
+        data.buildings is list && data.buildings.size() >= 1 && data.buildings.size() <= 30 &&
+        data.buildings[0] is string && data.buildings[0].size() >= 1 && data.buildings[0].size() <= 40 &&
+        data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
+        data.updatedAt is timestamp;
+    }
+
     function isValidAllowedAccount(data, accountId) {
       return data.keys().hasAll([
           'campusId', 'email', 'displayName', 'department', 'jobTitle',
@@ -160,7 +181,7 @@ service cloud.firestore {
         data.grade is string && data.grade.size() >= 1 && data.grade.size() <= 20 &&
         data.subject is string && data.subject.size() >= 1 && data.subject.size() <= 50 &&
         data.teacherName is string && data.teacherName.size() >= 1 && data.teacherName.size() <= 40 &&
-        data.expectedCount is int && data.expectedCount >= 1 && data.expectedCount <= 120 &&
+        data.expectedCount is int && data.expectedCount >= 0 && data.expectedCount <= 120 &&
         data.isRelocated is bool &&
         data.locationNote is string && data.locationNote.size() <= 100 &&
         data.roster is list && data.roster.size() <= 60 &&
@@ -205,6 +226,7 @@ service cloud.firestore {
           'campusId', 'date', 'dayOfWeek', 'period', 'timetableId',
           'building', 'roomNumber', 'className', 'subject', 'teacherName',
           'teacherPresent', 'expectedCount', 'actualCount', 'status', 'note',
+          'checklist', 'grade',
           'inspectorId', 'inspectorName', 'createdAt', 'updatedAt'
         ]) &&
         data.campusId == 'main-campus' &&
@@ -221,6 +243,15 @@ service cloud.firestore {
         data.expectedCount is int && data.expectedCount >= 0 && data.expectedCount <= 120 &&
         data.actualCount is int && data.actualCount >= 0 && data.actualCount <= 120 &&
         data.status in ['normal', 'minor_issue', 'urgent_issue', 'empty_relocated'] &&
+        (!('checklist' in data) || (
+          data.checklist is list &&
+          data.checklist.size() <= 8 &&
+          data.checklist.hasOnly([
+            'class_normal', 'proper_equipment', 'student_focused', 'good_interaction',
+            'teacher_late', 'poor_order', 'poor_learning', 'off_schedule_no_change'
+          ])
+        )) &&
+        (!('grade' in data) || (data.grade is string && data.grade.size() <= 20)) &&
         data.note is string && data.note.size() <= 500 &&
         data.inspectorId is string && data.inspectorId.size() >= 1 && data.inspectorId.size() <= 128 &&
         data.inspectorName is string && data.inspectorName.size() >= 1 && data.inspectorName.size() <= 60 &&
@@ -279,7 +310,7 @@ service cloud.firestore {
         (data.timetableId == '' || isValidId(data.timetableId)) &&
         data.location is string && data.location.size() >= 1 && data.location.size() <= 80 &&
         data.className is string && data.className.size() <= 30 &&
-        data.category in ['teacher_absent', 'classroom_order', 'student_truancy', 'facility_issue', 'safety_medical', 'other'] &&
+        data.category in ['teacher_absent', 'classroom_order', 'off_schedule', 'student_truancy', 'facility_issue', 'safety_medical', 'other'] &&
         data.severity in ['low', 'medium', 'high'] &&
         data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
         data.description is string && data.description.size() >= 1 && data.description.size() <= 1000 &&
@@ -307,6 +338,29 @@ service cloud.firestore {
         isAdmin();
       allow update: if false;
       allow delete: if isValidId(userId) && isVerifiedGoogleUser() && isAdmin();
+    }
+
+    // 1b. School Basic Settings (Read: Active Users & Admins; Write: Admin Only)
+    match /schoolSettings/{settingId} {
+      allow get: if isValidId(settingId) && isVerifiedGoogleUser() && isAuthorizedAccount();
+      allow list: if isVerifiedGoogleUser() && resource.data.campusId == 'main-campus' && isAuthorizedAccount();
+      allow create: if isVerifiedGoogleUser() &&
+        isValidId(settingId) &&
+        isValidSchoolSettings(incoming(), settingId) &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+      allow update: if isVerifiedGoogleUser() &&
+        isValidId(settingId) &&
+        isValidSchoolSettings(incoming(), settingId) &&
+        incoming().campusId == existing().campusId &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().updatedAt == request.time &&
+        isAdmin() &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'schoolName', 'academicYear', 'semester', 'currentWeek', 'buildings', 'updatedBy', 'updatedAt'
+        ]);
+      allow delete: if false;
     }
 
     // 2. Authorized Google Accounts Allowlist & Two-Tier RBAC (PII Protected)
@@ -483,12 +537,12 @@ service cloud.firestore {
           // Action: Inspector updates their patrol observation
           (existing().inspectorId == request.auth.uid &&
             incoming().diff(existing()).affectedKeys().hasOnly([
-              'teacherPresent', 'actualCount', 'status', 'note', 'updatedAt'
+              'teacherPresent', 'actualCount', 'status', 'checklist', 'grade', 'note', 'updatedAt'
             ])) ||
           // Action: Admin correction
           (isAdmin() &&
             incoming().diff(existing()).affectedKeys().hasOnly([
-              'teacherPresent', 'actualCount', 'status', 'note', 'inspectorName', 'updatedAt'
+              'teacherPresent', 'actualCount', 'status', 'checklist', 'grade', 'note', 'inspectorName', 'updatedAt'
             ]))
         );
       allow delete: if isValidId(logId) && isVerifiedGoogleUser() && isAuthorizedAccount() && (existing().inspectorId == request.auth.uid || isAdmin());

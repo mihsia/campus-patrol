@@ -9,20 +9,17 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import type {
-  AbsenceRecord,
   AccountStatus,
   AllowedAccount,
-  AutoAbsenceStatus,
   IncidentCategory,
   IncidentReport,
   IncidentSeverity,
   IncidentStatus,
-  LeaveRecord,
-  LeaveType,
-  ObservedAbsenceType,
+  PatrolCheckItem,
   PatrolLog,
   PatrolStatus,
-  RiskLevel,
+  SchoolSettings,
+  SemesterType,
   StaffProfile,
   StaffRole,
   TimetableSlot,
@@ -35,10 +32,10 @@ import {
   emailToAccountId,
   isValidEmailFormat,
   normalizeEmail,
+  sanitizeBuildings,
+  sanitizeChecklist,
   sanitizeDate,
   sanitizeId,
-  sanitizePeriods,
-  sanitizeRoster,
 } from './validation';
 import type { ParsedTimetableImportRow } from './exportReports';
 
@@ -90,7 +87,6 @@ export async function verifyAndBootstrapGoogleUser(params: {
       return { status: 'unauthorized', email: normalizedEmail };
     }
 
-    // Auto-bootstrap primary system administrator record on first sign-in
     const bootstrapPayload = {
       campusId: CAMPUS_ID,
       email: normalizedEmail,
@@ -135,7 +131,6 @@ export async function verifyAndBootstrapGoogleUser(params: {
     const resolvedRole: StaffRole = isBootstrapAdmin ? 'admin' : normalizeStaffRole(raw.role);
     const resolvedStatus: AccountStatus = isBootstrapAdmin ? 'active' : raw.status;
 
-    // Bind Firebase Auth UID on first Google sign-in (or UID update)
     if (raw.uid !== safeUid) {
       try {
         await updateDoc(allowedRef, {
@@ -189,7 +184,7 @@ export async function verifyAndBootstrapGoogleUser(params: {
   try {
     const profSnap = await getDoc(profileRef);
     const desiredName = clampString(account.displayName || displayName || '使用者', 60, '使用者');
-    const desiredDept = clampString(account.department || '學務處', 60, '學務處');
+    const desiredDept = clampString(account.department || '教務處', 60, '教務處');
     const desiredTitle = clampString(account.jobTitle || (isAdmin ? '系統管理者' : '巡堂使用者'), 60, '巡堂使用者');
 
     if (!profSnap.exists()) {
@@ -247,6 +242,62 @@ export async function verifyAndBootstrapGoogleUser(params: {
   }
 }
 
+export async function saveSchoolSettings(
+  uid: string,
+  input: {
+    schoolName: string;
+    academicYear: string;
+    semester: SemesterType;
+    currentWeek: number;
+    buildings: string[];
+  }
+): Promise<SchoolSettings> {
+  const ref = doc(db, 'schoolSettings', CAMPUS_ID);
+  const safeName = clampString(input.schoolName, 60, '利澤國小');
+  const safeYear = clampString(input.academicYear, 10, '115');
+  const safeSemester: SemesterType = input.semester === '第二學期' ? '第二學期' : '第一學期';
+  const safeWeek = clampInt(input.currentWeek, 1, 25);
+  const safeBuildings = sanitizeBuildings(input.buildings);
+  const safeUid = sanitizeId(uid, 'admin');
+
+  try {
+    const existing = await getDoc(ref);
+    if (existing.exists()) {
+      await updateDoc(ref, {
+        schoolName: safeName,
+        academicYear: safeYear,
+        semester: safeSemester,
+        currentWeek: safeWeek,
+        buildings: safeBuildings,
+        updatedBy: safeUid,
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      await setDoc(ref, {
+        campusId: CAMPUS_ID,
+        schoolName: safeName,
+        academicYear: safeYear,
+        semester: safeSemester,
+        currentWeek: safeWeek,
+        buildings: safeBuildings,
+        updatedBy: safeUid,
+        updatedAt: serverTimestamp(),
+      });
+    }
+    return {
+      campusId: CAMPUS_ID,
+      schoolName: safeName,
+      academicYear: safeYear,
+      semester: safeSemester,
+      currentWeek: safeWeek,
+      buildings: safeBuildings,
+      updatedBy: safeUid,
+    };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `schoolSettings/${CAMPUS_ID}`);
+  }
+}
+
 export async function updateOwnStaffProfile(
   uid: string,
   email: string,
@@ -255,7 +306,7 @@ export async function updateOwnStaffProfile(
   const safeUid = sanitizeId(uid, 'user');
   const accountId = emailToAccountId(email);
   const safeName = clampString(updates.displayName, 60, '巡堂教師');
-  const safeDept = clampString(updates.department, 60, '學務處');
+  const safeDept = clampString(updates.department, 60, '教務處');
   const safeTitle = clampString(updates.jobTitle, 60, '巡堂人員');
 
   try {
@@ -307,7 +358,7 @@ export async function adminCreateAllowedAccount(
       campusId: CAMPUS_ID,
       email: normalizedEmail,
       displayName: clampString(input.displayName, 60, normalizedEmail.split('@')[0] || '使用者'),
-      department: clampString(input.department, 60, '學務處'),
+      department: clampString(input.department, 60, '教務處'),
       jobTitle: clampString(input.jobTitle, 60, input.role === 'admin' ? '系統管理者' : '巡堂使用者'),
       role: input.role,
       status: 'active',
@@ -355,7 +406,6 @@ export async function adminUpdateAllowedAccount(
     handleFirestoreError(err, OperationType.UPDATE, `allowedAccounts/${account.id}`);
   }
 
-  // Mirror display/role updates to staffProfiles if the user has already signed in
   if (account.uid) {
     const safeUid = sanitizeId(account.uid, 'user');
     try {
@@ -417,17 +467,17 @@ export async function createTimetableSlot(
       campusId: CAMPUS_ID,
       dayOfWeek: clampInt(input.dayOfWeek, 1, 5),
       period: clampInt(input.period, 1, 8),
-      building: clampString(input.building, 40, '教學A棟'),
+      building: clampString(input.building, 40, '行政教學大樓'),
       floor: clampString(input.floor, 20, '1F'),
-      roomNumber: clampString(input.roomNumber, 20, 'A101'),
+      roomNumber: clampString(input.roomNumber, 20, '101'),
       className: clampString(input.className, 30, '未命名班級'),
-      grade: clampString(input.grade, 20, '高一'),
-      subject: clampString(input.subject, 50, '一般課程'),
-      teacherName: clampString(input.teacherName, 40, '任課教師'),
-      expectedCount: clampInt(input.expectedCount, 1, 120),
+      grade: clampString(input.grade, 20, '一年級'),
+      subject: clampString(input.subject, 50, '國語'),
+      teacherName: clampString(input.teacherName, 40, '授課教師'),
+      expectedCount: 0,
       isRelocated: Boolean(input.isRelocated),
       locationNote: clampString(input.locationNote, 100, ''),
-      roster: sanitizeRoster(input.roster),
+      roster: [],
       createdBy: clampString(uid, 128),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -440,33 +490,53 @@ export async function createTimetableSlot(
 
 export async function batchImportTimetableSlots(
   uid: string,
-  rows: ParsedTimetableImportRow[]
+  rows: ParsedTimetableImportRow[],
+  options?: { replaceSlotIds?: string[] }
 ): Promise<number> {
   const CHUNK_SIZE = 200;
+  const replaceIds = options?.replaceSlotIds ?? [];
+
+  // 1. Delete existing slots for replaced classes in safe chunks first
+  for (let i = 0; i < replaceIds.length; i += CHUNK_SIZE) {
+    const delChunk = replaceIds.slice(i, i + CHUNK_SIZE);
+    const delBatch = writeBatch(db);
+    delChunk.forEach((rawId) => {
+      const safeId = sanitizeId(rawId, 'tt');
+      delBatch.delete(doc(db, 'timetables', safeId));
+    });
+    try {
+      await delBatch.commit();
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'timetables');
+    }
+  }
+
+  // 2. Create fresh timetable slots with collision-free IDs so Firestore always treats as create
+  const batchToken = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   let imported = 0;
   for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
     const chunk = rows.slice(i, i + CHUNK_SIZE);
     const batch = writeBatch(db);
     chunk.forEach((row, idx) => {
       const slotId = sanitizeId(
-        `tt-d${row.dayOfWeek}-p${row.period}-${row.roomNumber}-${(i + idx).toString(36)}`,
+        `tt-d${row.dayOfWeek}-p${row.period}-${batchToken}-${(i + idx).toString(36)}`,
         'tt'
       );
       batch.set(doc(db, 'timetables', slotId), {
         campusId: CAMPUS_ID,
         dayOfWeek: clampInt(row.dayOfWeek, 1, 5),
         period: clampInt(row.period, 1, 8),
-        building: clampString(row.building, 40, '教學A棟'),
+        building: clampString(row.building, 40, '行政教學大樓'),
         floor: clampString(row.floor, 20, '1F'),
-        roomNumber: clampString(row.roomNumber, 20, 'A101'),
+        roomNumber: clampString(row.roomNumber, 20, '101'),
         className: clampString(row.className, 30, '未命名班級'),
-        grade: clampString(row.grade, 20, '高一'),
-        subject: clampString(row.subject, 50, '一般課程'),
-        teacherName: clampString(row.teacherName, 40, '任課教師'),
-        expectedCount: clampInt(row.expectedCount, 1, 120),
+        grade: clampString(row.grade, 20, '一年級'),
+        subject: clampString(row.subject, 50, '國語'),
+        teacherName: clampString(row.teacherName, 40, '授課教師'),
+        expectedCount: 0,
         isRelocated: Boolean(row.isRelocated),
         locationNote: clampString(row.locationNote, 100, ''),
-        roster: sanitizeRoster(row.roster),
+        roster: [],
         createdBy: clampString(uid, 128),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -482,6 +552,40 @@ export async function batchImportTimetableSlots(
   return imported;
 }
 
+export async function updateTimetableSlot(
+  timetableId: string,
+  updates: {
+    building: string;
+    floor: string;
+    roomNumber: string;
+    className: string;
+    grade: string;
+    subject: string;
+    teacherName: string;
+    isRelocated: boolean;
+    locationNote: string;
+  }
+): Promise<void> {
+  const safeId = sanitizeId(timetableId, 'tt');
+  const path = `timetables/${safeId}`;
+  try {
+    await updateDoc(doc(db, 'timetables', safeId), {
+      building: clampString(updates.building, 40, '行政教學大樓'),
+      floor: clampString(updates.floor, 20, '1F'),
+      roomNumber: clampString(updates.roomNumber, 20, '101'),
+      className: clampString(updates.className, 30, '未命名班級'),
+      grade: clampString(updates.grade, 20, '一年級'),
+      subject: clampString(updates.subject, 50, '國語'),
+      teacherName: clampString(updates.teacherName, 40, '授課教師'),
+      isRelocated: Boolean(updates.isRelocated),
+      locationNote: clampString(updates.locationNote, 100, ''),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, path);
+  }
+}
+
 export async function deleteTimetableSlot(timetableId: string): Promise<void> {
   const safeId = sanitizeId(timetableId, 'tt');
   try {
@@ -491,48 +595,23 @@ export async function deleteTimetableSlot(timetableId: string): Promise<void> {
   }
 }
 
-export async function createLeaveRecord(
-  uid: string,
-  input: {
-    date: string;
-    className: string;
-    seatNumber: string;
-    studentName: string;
-    leaveType: LeaveType;
-    periods: number[];
-    reason: string;
-    approvedBy: string;
-  }
-): Promise<string> {
-  const docId = sanitizeId(`lv-${input.date}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, 'lv');
-  try {
-    await setDoc(doc(db, 'leaveRecords', docId), {
-      campusId: CAMPUS_ID,
-      date: sanitizeDate(input.date),
-      className: clampString(input.className, 30, '未指定班級'),
-      seatNumber: clampString(input.seatNumber, 10, '01'),
-      studentName: clampString(input.studentName, 40, '學生'),
-      leaveType: input.leaveType,
-      periods: sanitizePeriods(input.periods),
-      reason: clampString(input.reason, 200, ''),
-      approvedBy: clampString(input.approvedBy, 60, '學務處'),
-      createdBy: clampString(uid, 128),
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+export async function batchDeleteTimetableSlots(timetableIds: string[]): Promise<number> {
+  const CHUNK_SIZE = 200;
+  let deleted = 0;
+  for (let i = 0; i < timetableIds.length; i += CHUNK_SIZE) {
+    const chunk = timetableIds.slice(i, i + CHUNK_SIZE);
+    const batch = writeBatch(db);
+    chunk.forEach((rawId) => {
+      batch.delete(doc(db, 'timetables', sanitizeId(rawId, 'tt')));
     });
-    return docId;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, `leaveRecords/${docId}`);
+    try {
+      await batch.commit();
+      deleted += chunk.length;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'timetables');
+    }
   }
-}
-
-export async function deleteLeaveRecord(leaveId: string): Promise<void> {
-  const safeId = sanitizeId(leaveId, 'lv');
-  try {
-    await deleteDoc(doc(db, 'leaveRecords', safeId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `leaveRecords/${safeId}`);
-  }
+  return deleted;
 }
 
 export async function savePatrolLog(params: {
@@ -540,8 +619,7 @@ export async function savePatrolLog(params: {
   inspectorName: string;
   date: string;
   slot: TimetableSlot;
-  teacherPresent: boolean;
-  actualCount: number;
+  checklist: PatrolCheckItem[];
   status: PatrolStatus;
   note: string;
   existingOwnLog?: PatrolLog | null;
@@ -551,21 +629,25 @@ export async function savePatrolLog(params: {
     inspectorName,
     date,
     slot,
-    teacherPresent,
-    actualCount,
+    checklist,
     status,
     note,
     existingOwnLog,
   } = params;
 
-  // If the current user already created a patrol log for this slot today, update it in place
+  const safeChecklist = sanitizeChecklist(checklist);
+  const teacherPresent = !safeChecklist.includes('teacher_late');
+  const safeGrade = clampString(slot.grade || '', 20, '');
+
   if (existingOwnLog && existingOwnLog.inspectorId === inspectorId) {
     const path = `patrolLogs/${existingOwnLog.id}`;
     try {
       await updateDoc(doc(db, 'patrolLogs', existingOwnLog.id), {
-        teacherPresent: Boolean(teacherPresent),
-        actualCount: clampInt(actualCount, 0, 120),
+        teacherPresent,
+        actualCount: 0,
         status,
+        checklist: safeChecklist,
+        grade: safeGrade,
         note: clampString(note, 500, ''),
         updatedAt: serverTimestamp(),
       });
@@ -575,7 +657,6 @@ export async function savePatrolLog(params: {
     }
   }
 
-  // Otherwise create a new patrol log document owned by this inspector
   const docId = sanitizeId(
     `log-${date}-p${slot.period}-${slot.roomNumber}-${Date.now().toString(36)}`,
     'log'
@@ -588,15 +669,17 @@ export async function savePatrolLog(params: {
       dayOfWeek: clampInt(slot.dayOfWeek, 1, 5),
       period: clampInt(slot.period, 1, 8),
       timetableId: sanitizeId(slot.id, 'tt'),
-      building: clampString(slot.building, 40, '教學大樓'),
-      roomNumber: clampString(slot.roomNumber, 20, 'A101'),
+      building: clampString(slot.building, 40, '行政教學大樓'),
+      roomNumber: clampString(slot.roomNumber, 20, '101'),
       className: clampString(slot.className, 30, '未命名班級'),
-      subject: clampString(slot.subject, 50, '課程'),
-      teacherName: clampString(slot.teacherName, 40, '教師'),
-      teacherPresent: Boolean(teacherPresent),
-      expectedCount: clampInt(slot.expectedCount, 0, 120),
-      actualCount: clampInt(actualCount, 0, 120),
+      grade: safeGrade,
+      subject: clampString(slot.subject, 50, '國語'),
+      teacherName: clampString(slot.teacherName, 40, '授課教師'),
+      teacherPresent,
+      expectedCount: 0,
+      actualCount: 0,
       status,
+      checklist: safeChecklist,
       note: clampString(note, 500, ''),
       inspectorId: clampString(inspectorId, 128),
       inspectorName: clampString(inspectorName, 60, '巡堂人員'),
@@ -606,82 +689,6 @@ export async function savePatrolLog(params: {
     return docId;
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, path);
-  }
-}
-
-export async function createAbsenceRecord(params: {
-  recordedBy: string;
-  recordedByName: string;
-  date: string;
-  slot: TimetableSlot;
-  seatNumber: string;
-  studentName: string;
-  observedType: ObservedAbsenceType;
-  autoStatus: AutoAbsenceStatus;
-  riskLevel: RiskLevel;
-  note: string;
-}): Promise<string> {
-  const docId = sanitizeId(
-    `abs-${params.date}-p${params.slot.period}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-    'abs'
-  );
-  const path = `absences/${docId}`;
-  try {
-    await setDoc(doc(db, 'absences', docId), {
-      campusId: CAMPUS_ID,
-      date: sanitizeDate(params.date),
-      period: clampInt(params.slot.period, 1, 8),
-      timetableId: sanitizeId(params.slot.id, 'tt'),
-      className: clampString(params.slot.className, 30, '未指定班級'),
-      subject: clampString(params.slot.subject, 50, '課程'),
-      teacherName: clampString(params.slot.teacherName, 40, '教師'),
-      seatNumber: clampString(params.seatNumber, 10, '01'),
-      studentName: clampString(params.studentName, 40, '學生'),
-      observedType: params.observedType,
-      autoStatus: params.autoStatus,
-      riskLevel: params.riskLevel,
-      verified: false,
-      note: clampString(params.note, 300, ''),
-      recordedBy: clampString(params.recordedBy, 128),
-      recordedByName: clampString(params.recordedByName, 60, '巡堂人員'),
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-    return docId;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, path);
-  }
-}
-
-export async function updateAbsenceVerification(
-  absenceId: string,
-  updates: {
-    autoStatus: AutoAbsenceStatus;
-    riskLevel: RiskLevel;
-    verified: boolean;
-    note: string;
-  }
-): Promise<void> {
-  const safeId = sanitizeId(absenceId, 'abs');
-  try {
-    await updateDoc(doc(db, 'absences', safeId), {
-      autoStatus: updates.autoStatus,
-      riskLevel: updates.riskLevel,
-      verified: Boolean(updates.verified),
-      note: clampString(updates.note, 300, ''),
-      updatedAt: serverTimestamp(),
-    });
-  } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, `absences/${safeId}`);
-  }
-}
-
-export async function deleteAbsenceRecord(absenceId: string): Promise<void> {
-  const safeId = sanitizeId(absenceId, 'abs');
-  try {
-    await deleteDoc(doc(db, 'absences', safeId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `absences/${safeId}`);
   }
 }
 
@@ -765,11 +772,10 @@ export async function deleteIncidentReport(incidentId: string): Promise<void> {
 }
 
 export const collectionRefs = {
+  schoolSettings: () => collection(db, 'schoolSettings'),
   allowedAccounts: () => collection(db, 'allowedAccounts'),
   staffProfiles: () => collection(db, 'staffProfiles'),
   timetables: () => collection(db, 'timetables'),
-  leaveRecords: () => collection(db, 'leaveRecords'),
   patrolLogs: () => collection(db, 'patrolLogs'),
-  absences: () => collection(db, 'absences'),
   incidents: () => collection(db, 'incidents'),
 };

@@ -1,7 +1,20 @@
+import type { PatrolCheckItem } from '../types/patrol';
+
 // Synchronized verbatim with firebase-blueprint.json maxLength and pattern constraints
 export const ID_REGEX = /^[a-zA-Z0-9_-]+$/;
 export const DATE_REGEX = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
 export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const VALID_CHECKLIST_SET = new Set<PatrolCheckItem>([
+  'class_normal',
+  'proper_equipment',
+  'student_focused',
+  'good_interaction',
+  'teacher_late',
+  'poor_order',
+  'poor_learning',
+  'off_schedule_no_change',
+]);
 
 export function normalizeEmail(raw: string): string {
   return raw.trim().toLowerCase().slice(0, 120);
@@ -46,20 +59,32 @@ export function sanitizeDate(dateStr: string): string {
   return `${y}-${m}-${d}`;
 }
 
-export function sanitizeRoster(roster: string[]): string[] {
-  return roster
-    .map((entry) => entry.trim().slice(0, 60))
-    .filter((entry) => entry.length > 0)
-    .slice(0, 60);
+export function sanitizeBuildings(buildings: string[]): string[] {
+  const seen = new Set<string>();
+  const cleaned: string[] = [];
+  for (const raw of buildings) {
+    const val = raw.trim().slice(0, 40);
+    if (val && !seen.has(val)) {
+      seen.add(val);
+      cleaned.push(val);
+    }
+    if (cleaned.length >= 30) break;
+  }
+  return cleaned.length > 0 ? cleaned : ['教學大樓'];
 }
 
-export function sanitizePeriods(periods: number[]): number[] {
-  const unique = Array.from(
-    new Set(
-      periods
-        .map((p) => clampInt(p, 1, 8))
-        .filter((p) => p >= 1 && p <= 8)
-    )
-  ).sort((a, b) => a - b);
-  return unique.length > 0 ? unique.slice(0, 8) : [1];
+export function sanitizeChecklist(items: string[]): PatrolCheckItem[] {
+  const seen = new Set<PatrolCheckItem>();
+  const result: PatrolCheckItem[] = [];
+  for (const item of items) {
+    if (VALID_CHECKLIST_SET.has(item as PatrolCheckItem)) {
+      const typed = item as PatrolCheckItem;
+      if (!seen.has(typed)) {
+        seen.add(typed);
+        result.push(typed);
+      }
+    }
+    if (result.length >= 8) break;
+  }
+  return result;
 }

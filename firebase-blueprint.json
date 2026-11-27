@@ -23,6 +23,58 @@
       },
       "required": ["uid", "grantedBy", "createdAt"]
     },
+    "SchoolSettings": {
+      "title": "SchoolSettings",
+      "description": "Campus basic data configuration including school name, academic year, semester, current week, and building names.",
+      "type": "object",
+      "properties": {
+        "campusId": {
+          "type": "string",
+          "enum": ["main-campus"]
+        },
+        "schoolName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "academicYear": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 10
+        },
+        "semester": {
+          "type": "string",
+          "enum": ["第一學期", "第二學期"]
+        },
+        "currentWeek": {
+          "type": "integer",
+          "description": "Active school patrol week number (1 to 25)"
+        },
+        "buildings": {
+          "type": "array",
+          "description": "Bounded list of campus building names (1 to 30 entries)"
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "campusId",
+        "schoolName",
+        "academicYear",
+        "semester",
+        "currentWeek",
+        "buildings",
+        "updatedBy",
+        "updatedAt"
+      ]
+    },
     "AllowedAccount": {
       "title": "AllowedAccount",
       "description": "Authoritative Google-only account allowlist and two-tier RBAC registry (admin/user, active/disabled) managed by system admins.",
@@ -404,6 +456,14 @@
           "type": "string",
           "enum": ["normal", "minor_issue", "urgent_issue", "empty_relocated"]
         },
+        "checklist": {
+          "type": "array",
+          "description": "Selected items from the 8 official patrol inspection checklist indicators"
+        },
+        "grade": {
+          "type": "string",
+          "maxLength": 20
+        },
         "note": {
           "type": "string",
           "maxLength": 500
@@ -593,6 +653,7 @@
           "enum": [
             "teacher_absent",
             "classroom_order",
+            "off_schedule",
             "student_truancy",
             "facility_issue",
             "safety_medical",
@@ -674,6 +735,10 @@
     "/admins/{userId}": {
       "schema": { "$ref": "#/entities/AdminRecord" },
       "description": "Trusted admin role assignment documents."
+    },
+    "/schoolSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/SchoolSettings" },
+      "description": "Campus basic data settings including school name, academic year, semester, week number, and buildings."
     },
     "/allowedAccounts/{accountId}": {
       "schema": { "$ref": "#/entities/AllowedAccount" },

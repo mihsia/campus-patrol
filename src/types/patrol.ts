@@ -5,14 +5,22 @@ export const BOOTSTRAP_ADMIN_EMAIL = 'mihsia@gmail.com';
 
 export type StaffRole = 'admin' | 'user';
 export type AccountStatus = 'active' | 'disabled';
+export type SemesterType = '第一學期' | '第二學期';
 export type PatrolStatus = 'normal' | 'minor_issue' | 'urgent_issue' | 'empty_relocated';
-export type LeaveType = 'sick' | 'personal' | 'official' | 'bereavement';
-export type ObservedAbsenceType = 'missing' | 'late' | 'left_early' | 'unauthorized_exit';
-export type AutoAbsenceStatus = 'truant' | 'late' | 'left_early' | 'excused_leave' | 'pending_review';
-export type RiskLevel = 'low' | 'medium' | 'high';
+export type PatrolCheckItem =
+  | 'class_normal'
+  | 'proper_equipment'
+  | 'student_focused'
+  | 'good_interaction'
+  | 'teacher_late'
+  | 'poor_order'
+  | 'poor_learning'
+  | 'off_schedule_no_change';
+
 export type IncidentCategory =
   | 'teacher_absent'
   | 'classroom_order'
+  | 'off_schedule'
   | 'student_truancy'
   | 'facility_issue'
   | 'safety_medical'
@@ -20,7 +28,34 @@ export type IncidentCategory =
 export type IncidentSeverity = 'low' | 'medium' | 'high';
 export type IncidentStatus = 'open' | 'in_progress' | 'resolved';
 
-export type NavSection = 'dashboard' | 'patrol' | 'incidents' | 'timetable' | 'reports' | 'staff';
+export type NavSection =
+  | 'dashboard'
+  | 'patrol'
+  | 'incidents'
+  | 'basic_data'
+  | 'timetable'
+  | 'reports'
+  | 'staff';
+
+export interface SchoolSettings {
+  campusId: typeof CAMPUS_ID;
+  schoolName: string;
+  academicYear: string;
+  semester: SemesterType;
+  currentWeek: number;
+  buildings: string[];
+  updatedBy?: string;
+  updatedAt?: Timestamp | null;
+}
+
+export const DEFAULT_SCHOOL_SETTINGS: SchoolSettings = {
+  campusId: CAMPUS_ID,
+  schoolName: '利澤國小',
+  academicYear: '115',
+  semester: '第一學期',
+  currentWeek: 1,
+  buildings: ['行政教學大樓', '忠孝樓', '科任專科大樓'],
+};
 
 export interface AllowedAccount {
   id: string;
@@ -69,22 +104,6 @@ export interface TimetableSlot {
   updatedAt?: Timestamp | null;
 }
 
-export interface LeaveRecord {
-  id: string;
-  campusId: typeof CAMPUS_ID;
-  date: string; // YYYY-MM-DD
-  className: string;
-  seatNumber: string;
-  studentName: string;
-  leaveType: LeaveType;
-  periods: number[];
-  reason: string;
-  approvedBy: string;
-  createdBy: string;
-  createdAt?: Timestamp | null;
-  updatedAt?: Timestamp | null;
-}
-
 export interface PatrolLog {
   id: string;
   campusId: typeof CAMPUS_ID;
@@ -95,37 +114,17 @@ export interface PatrolLog {
   building: string;
   roomNumber: string;
   className: string;
+  grade?: string;
   subject: string;
   teacherName: string;
   teacherPresent: boolean;
   expectedCount: number;
   actualCount: number;
   status: PatrolStatus;
+  checklist?: PatrolCheckItem[];
   note: string;
   inspectorId: string;
   inspectorName: string;
-  createdAt?: Timestamp | null;
-  updatedAt?: Timestamp | null;
-}
-
-export interface AbsenceRecord {
-  id: string;
-  campusId: typeof CAMPUS_ID;
-  date: string; // YYYY-MM-DD
-  period: number;
-  timetableId: string;
-  className: string;
-  subject: string;
-  teacherName: string;
-  seatNumber: string;
-  studentName: string;
-  observedType: ObservedAbsenceType;
-  autoStatus: AutoAbsenceStatus;
-  riskLevel: RiskLevel;
-  verified: boolean;
-  note: string;
-  recordedBy: string;
-  recordedByName: string;
   createdAt?: Timestamp | null;
   updatedAt?: Timestamp | null;
 }
@@ -167,14 +166,14 @@ export interface PeriodBellInfo {
 }
 
 export const PERIOD_SCHEDULE: PeriodBellInfo[] = [
-  { period: 1, label: '第 1 節', start: '08:10', end: '09:00' },
-  { period: 2, label: '第 2 節', start: '09:10', end: '10:00' },
-  { period: 3, label: '第 3 節', start: '10:10', end: '11:00' },
-  { period: 4, label: '第 4 節', start: '11:10', end: '12:00' },
-  { period: 5, label: '第 5 節', start: '13:10', end: '14:00' },
-  { period: 6, label: '第 6 節', start: '14:10', end: '15:00' },
-  { period: 7, label: '第 7 節', start: '15:10', end: '16:00' },
-  { period: 8, label: '第 8 節', start: '16:10', end: '17:00' },
+  { period: 1, label: '第 1 節', start: '08:30', end: '09:10' },
+  { period: 2, label: '第 2 節', start: '09:20', end: '10:00' },
+  { period: 3, label: '第 3 節', start: '10:30', end: '11:10' },
+  { period: 4, label: '第 4 節', start: '11:20', end: '12:00' },
+  { period: 5, label: '第 5 節', start: '13:30', end: '14:10' },
+  { period: 6, label: '第 6 節', start: '14:30', end: '15:10' },
+  { period: 7, label: '第 7 節', start: '15:20', end: '16:00' },
+  { period: 8, label: '第 8 節', start: '16:10', end: '16:50' },
 ];
 
 export const DAY_OF_WEEK_LABELS: Record<number, string> = {
@@ -185,49 +184,82 @@ export const DAY_OF_WEEK_LABELS: Record<number, string> = {
   5: '星期五',
 };
 
+export const DAY_OF_WEEK_SHORT: Record<number, string> = {
+  1: '一',
+  2: '二',
+  3: '三',
+  4: '四',
+  5: '五',
+};
+
+export const PATROL_POSITIVE_ITEMS: Array<{ key: PatrolCheckItem; label: string }> = [
+  { key: 'class_normal', label: '上課大致正常' },
+  { key: 'proper_equipment', label: '妥善運用教學設備' },
+  { key: 'student_focused', label: '學生專注上課' },
+  { key: 'good_interaction', label: '師生互動良好' },
+];
+
+export const PATROL_ISSUE_ITEMS: Array<{ key: PatrolCheckItem; label: string }> = [
+  { key: 'teacher_late', label: '教師未準時上課' },
+  { key: 'poor_order', label: '班級秩序欠佳' },
+  { key: 'poor_learning', label: '學生學習狀況差' },
+  { key: 'off_schedule_no_change', label: '未按課表上課且無調課' },
+];
+
+export const ALL_PATROL_CHECKLIST_ITEMS: Array<{
+  key: PatrolCheckItem;
+  label: string;
+  group: 'positive' | 'issue';
+}> = [
+  ...PATROL_POSITIVE_ITEMS.map((item) => ({ ...item, group: 'positive' as const })),
+  ...PATROL_ISSUE_ITEMS.map((item) => ({ ...item, group: 'issue' as const })),
+];
+
+export const PATROL_CHECKLIST_LABELS: Record<PatrolCheckItem, string> = {
+  class_normal: '上課大致正常',
+  proper_equipment: '妥善運用教學設備',
+  student_focused: '學生專注上課',
+  good_interaction: '師生互動良好',
+  teacher_late: '教師未準時上課',
+  poor_order: '班級秩序欠佳',
+  poor_learning: '學生學習狀況差',
+  off_schedule_no_change: '未按課表上課且無調課',
+};
+
+export const STANDARD_GRADES = [
+  '一年級',
+  '二年級',
+  '三年級',
+  '四年級',
+  '五年級',
+  '六年級',
+] as const;
+
 export const PATROL_STATUS_LABELS: Record<PatrolStatus, string> = {
-  normal: '正常上課',
-  minor_issue: '秩序微異常',
+  normal: '教學正常',
+  minor_issue: '待改善事項',
   urgent_issue: '緊急異常',
   empty_relocated: '移地／空堂',
 };
 
-export const LEAVE_TYPE_LABELS: Record<LeaveType, string> = {
-  sick: '病假',
-  personal: '事假',
-  official: '公假',
-  bereavement: '喪假',
-};
-
-export const OBSERVED_ABSENCE_LABELS: Record<ObservedAbsenceType, string> = {
-  missing: '未到席',
-  late: '遲到進班',
-  left_early: '早退離席',
-  unauthorized_exit: '擅離教室',
-};
-
-export const AUTO_ABSENCE_STATUS_LABELS: Record<AutoAbsenceStatus, string> = {
-  truant: '疑似曠課',
-  late: '遲到',
-  left_early: '早退',
-  excused_leave: '已核假',
-  pending_review: '待確認',
-};
-
-export const RISK_LEVEL_LABELS: Record<RiskLevel, string> = {
-  low: '一般關注',
-  medium: '中度預警',
-  high: '高風險通報',
-};
-
 export const INCIDENT_CATEGORY_LABELS: Record<IncidentCategory, string> = {
-  teacher_absent: '教師未到／遲到',
-  classroom_order: '課堂秩序異常',
-  student_truancy: '學生缺曠／擅離',
-  facility_issue: '設備環境異常',
+  teacher_absent: '教師未準時／未到班',
+  classroom_order: '班級秩序／學習狀況',
+  off_schedule: '未按課表上課且無調課',
+  student_truancy: '學生出缺席（歷史）',
+  facility_issue: '教學設備環境異常',
   safety_medical: '突發安全／傷病',
   other: '其他巡堂事項',
 };
+
+export const ACTIVE_INCIDENT_CATEGORIES: IncidentCategory[] = [
+  'teacher_absent',
+  'classroom_order',
+  'off_schedule',
+  'facility_issue',
+  'safety_medical',
+  'other',
+];
 
 export const INCIDENT_SEVERITY_LABELS: Record<IncidentSeverity, string> = {
   low: '一般提醒',
@@ -264,6 +296,41 @@ export function normalizeStaffRole(role: unknown): StaffRole {
   return role === 'admin' ? 'admin' : 'user';
 }
 
+export function deriveStatusFromChecklist(
+  checklist: PatrolCheckItem[],
+  isRelocated?: boolean
+): PatrolStatus {
+  if (checklist.includes('teacher_late') || checklist.includes('off_schedule_no_change')) {
+    return 'urgent_issue';
+  }
+  if (checklist.includes('poor_order') || checklist.includes('poor_learning')) {
+    return 'minor_issue';
+  }
+  if (isRelocated && checklist.length === 0) {
+    return 'empty_relocated';
+  }
+  return 'normal';
+}
+
+export function getEffectiveChecklist(log: PatrolLog | null | undefined): PatrolCheckItem[] {
+  if (!log) return [];
+  if (Array.isArray(log.checklist) && log.checklist.length > 0) {
+    return log.checklist;
+  }
+  // Graceful fallback for any legacy logs saved before the 8-item checklist
+  const derived: PatrolCheckItem[] = [];
+  if (log.status === 'normal') {
+    derived.push('class_normal');
+  }
+  if (!log.teacherPresent) {
+    derived.push('teacher_late');
+  }
+  if (log.status === 'minor_issue') {
+    derived.push('poor_order');
+  }
+  return derived;
+}
+
 export function getTodayDateString(): string {
   const now = new Date();
   const y = now.getFullYear();
@@ -277,7 +344,7 @@ export function getDayOfWeekFromDate(dateStr: string): number {
   if (parts.length !== 3 || parts.some(Number.isNaN)) return 1;
   const d = new Date(parts[0], parts[1] - 1, parts[2]);
   const day = d.getDay(); // 0=Sun..6=Sat
-  if (day === 0 || day === 6) return 1; // Default school schedule to Monday on weekends
+  if (day === 0 || day === 6) return 1;
   return day;
 }
 

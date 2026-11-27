@@ -4,17 +4,18 @@ import {
   ArrowRight,
   Building2,
   CheckCircle2,
+  ClipboardCheck,
   Clock,
   Database,
   MapPin,
   ShieldAlert,
   UserCheck,
-  Users,
 } from 'lucide-react';
 import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   ComposedChart,
   Legend,
   Line,
@@ -24,26 +25,29 @@ import {
   YAxis,
 } from 'recharts';
 import type {
-  AbsenceRecord,
   IncidentReport,
-  LeaveRecord,
   NavSection,
   PatrolLog,
+  SchoolSettings,
   TimetableSlot,
 } from '../types/patrol';
 import {
+  ALL_PATROL_CHECKLIST_ITEMS,
   DAY_OF_WEEK_LABELS,
   INCIDENT_CATEGORY_LABELS,
   INCIDENT_SEVERITY_LABELS,
   INCIDENT_STATUS_LABELS,
+  PATROL_CHECKLIST_LABELS,
+  PATROL_ISSUE_ITEMS,
   PATROL_STATUS_LABELS,
   PERIOD_SCHEDULE,
   getDayOfWeekFromDate,
+  getEffectiveChecklist,
 } from '../types/patrol';
-import { computeClassAttendanceStats } from '../lib/truancyEngine';
 import { getIncidentElapsedMinutes, isIncidentOverdueEscalation } from '../lib/notifications';
 
 interface DashboardViewProps {
+  schoolSettings: SchoolSettings;
   selectedDate: string;
   selectedPeriod: number;
   selectedBuilding: string;
@@ -52,8 +56,6 @@ interface DashboardViewProps {
   onChangeBuilding: (building: string) => void;
   timetables: TimetableSlot[];
   patrolLogs: PatrolLog[];
-  absences: AbsenceRecord[];
-  leaveRecords: LeaveRecord[];
   incidents: IncidentReport[];
   onOpenQuickPatrol: (slot: TimetableSlot) => void;
   onNavigate: (section: NavSection) => void;
@@ -63,6 +65,7 @@ interface DashboardViewProps {
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
+  schoolSettings,
   selectedDate,
   selectedPeriod,
   selectedBuilding,
@@ -71,8 +74,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onChangeBuilding,
   timetables,
   patrolLogs,
-  absences,
-  leaveRecords,
   incidents,
   onOpenQuickPatrol,
   onNavigate,
@@ -83,68 +84,80 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const dayOfWeek = getDayOfWeekFromDate(selectedDate);
 
   const buildings = useMemo(() => {
-    const set = new Set<string>();
-    timetables.forEach((t) => set.add(t.building));
-    return ['ALL', ...Array.from(set).sort()];
-  }, [timetables]);
+    const ordered = [...schoolSettings.buildings];
+    timetables.forEach((t) => {
+      if (t.building && !ordered.includes(t.building)) {
+        ordered.push(t.building);
+      }
+    });
+    return ['ALL', ...ordered];
+  }, [schoolSettings.buildings, timetables]);
 
   const periodSlots = useMemo(() => {
     return timetables
       .filter((t) => t.dayOfWeek === dayOfWeek && t.period === selectedPeriod)
       .filter((t) => selectedBuilding === 'ALL' || t.building === selectedBuilding)
-      .sort((a, b) => a.building.localeCompare(b.building) || a.roomNumber.localeCompare(b.roomNumber));
+      .sort(
+        (a, b) =>
+          a.building.localeCompare(b.building, 'zh-Hant') ||
+          a.roomNumber.localeCompare(b.roomNumber)
+      );
   }, [timetables, dayOfWeek, selectedPeriod, selectedBuilding]);
 
   const todayLogs = useMemo(
-    () => patrolLogs.filter((l) => l.date === selectedDate),
-    [patrolLogs, selectedDate]
-  );
-
-  const periodLogs = useMemo(
-    () => todayLogs.filter((l) => l.period === selectedPeriod),
-    [todayLogs, selectedPeriod]
-  );
-
-  const todayAbsences = useMemo(
-    () => absences.filter((a) => a.date === selectedDate),
-    [absences, selectedDate]
-  );
-
-  const periodAbsences = useMemo(
-    () => todayAbsences.filter((a) => a.period === selectedPeriod),
-    [todayAbsences, selectedPeriod]
-  );
-
-  const classStats = useMemo(
     () =>
-      computeClassAttendanceStats({
-        periodSlots,
-        periodPatrolLogs: periodLogs,
-        periodAbsences,
-        leaveRecords,
-        date: selectedDate,
-        period: selectedPeriod,
-      }),
-    [periodSlots, periodLogs, periodAbsences, leaveRecords, selectedDate, selectedPeriod]
+      patrolLogs.filter(
+        (l) =>
+          l.date === selectedDate &&
+          (selectedBuilding === 'ALL' || l.building === selectedBuilding)
+      ),
+    [patrolLogs, selectedDate, selectedBuilding]
   );
 
-  // KPI Metrics
+  const periodLogsBySlot = useMemo(() => {
+    const map = new Map<string, PatrolLog>();
+    todayLogs
+      .filter((l) => l.period === selectedPeriod)
+      .forEach((log) => {
+        const existing = map.get(log.timetableId);
+        const t1 = log.updatedAt?.toMillis?.() ?? 0;
+        const t2 = existing?.updatedAt?.toMillis?.() ?? 0;
+        if (!existing || t1 >= t2) {
+          map.set(log.timetableId, log);
+        }
+      });
+    return map;
+  }, [todayLogs, selectedPeriod]);
+
+  // KPI Metrics (Focused 100% on Teaching Patrol Observations — No Student Attendance)
   const kpis = useMemo(() => {
-    const totalClasses = classStats.length;
-    const patrolledCount = classStats.filter((c) => c.patrolled).length;
+    const totalClasses = periodSlots.length;
+    const patrolledCount = periodSlots.filter((s) => periodLogsBySlot.has(s.id)).length;
     const coveragePct = totalClasses > 0 ? Math.round((patrolledCount / totalClasses) * 100) : 0;
 
-    const normalOrRelocated = classStats.filter(
-      (c) => c.patrolStatus === 'normal' || c.patrolStatus === 'empty_relocated'
-    ).length;
+    let normalOrRelocated = 0;
+    periodSlots.forEach((s) => {
+      const log = periodLogsBySlot.get(s.id);
+      if (log && (log.status === 'normal' || log.status === 'empty_relocated')) {
+        normalOrRelocated += 1;
+      }
+    });
     const normalRate =
       patrolledCount > 0 ? Math.round((normalOrRelocated / patrolledCount) * 1000) / 10 : 100;
 
     const activeIncidents = incidents.filter((i) => i.status !== 'resolved');
     const highActiveCount = activeIncidents.filter((i) => i.severity === 'high').length;
 
-    const todayTruantCount = todayAbsences.filter((a) => a.autoStatus === 'truant').length;
-    const todayExcusedCount = todayAbsences.filter((a) => a.autoStatus === 'excused_leave').length;
+    const issueKeys = new Set(PATROL_ISSUE_ITEMS.map((i) => i.key));
+    let todayIssueChecks = 0;
+    let todayPositiveChecks = 0;
+    todayLogs.forEach((log) => {
+      const list = getEffectiveChecklist(log);
+      list.forEach((k) => {
+        if (issueKeys.has(k)) todayIssueChecks += 1;
+        else todayPositiveChecks += 1;
+      });
+    });
 
     return {
       totalClasses,
@@ -153,13 +166,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       normalRate,
       activeIncidentCount: activeIncidents.length,
       highActiveCount,
-      todayAbsenceTotal: todayAbsences.length,
-      todayTruantCount,
-      todayExcusedCount,
+      todayTotalLogs: todayLogs.length,
+      todayPositiveChecks,
+      todayIssueChecks,
     };
-  }, [classStats, incidents, todayAbsences]);
+  }, [periodSlots, periodLogsBySlot, incidents, todayLogs]);
 
-  // Dynamic Chart 2: Period-by-period trend across Periods 1-8 for selectedDate
+  // Chart 1: Today's 8-Item Patrol Checklist Distribution
+  const checklistChartData = useMemo(() => {
+    const counts = new Map<string, number>();
+    todayLogs.forEach((log) => {
+      getEffectiveChecklist(log).forEach((key) => {
+        counts.set(key, (counts.get(key) || 0) + 1);
+      });
+    });
+
+    return ALL_PATROL_CHECKLIST_ITEMS.map((item) => ({
+      name: item.label,
+      次數: counts.get(item.key) || 0,
+      group: item.group,
+    }));
+  }, [todayLogs]);
+
+  // Chart 2: Period-by-period patrol progress & issue trend across Periods 1-8
   const periodTrendData = useMemo(() => {
     return PERIOD_SCHEDULE.map((p) => {
       const slotsCount = timetables.filter(
@@ -168,28 +197,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           t.period === p.period &&
           (selectedBuilding === 'ALL' || t.building === selectedBuilding)
       ).length;
-      const logsForP = todayLogs.filter(
-        (l) =>
-          l.period === p.period &&
-          (selectedBuilding === 'ALL' || l.building === selectedBuilding)
-      );
+      const logsForP = todayLogs.filter((l) => l.period === p.period);
       const uniquePatrolled = new Set(logsForP.map((l) => l.timetableId)).size;
       const issueCount = logsForP.filter(
         (l) => l.status === 'minor_issue' || l.status === 'urgent_issue'
       ).length;
-      const absCount = todayAbsences.filter(
-        (a) => a.period === p.period && a.autoStatus !== 'excused_leave'
-      ).length;
 
       return {
         name: `第${p.period}節`,
-        已巡班數: uniquePatrolled,
         應巡班數: slotsCount,
-        巡堂異常: issueCount,
-        缺曠人次: absCount,
+        已巡班數: uniquePatrolled,
+        待改善異常: issueCount,
       };
     });
-  }, [timetables, dayOfWeek, selectedBuilding, todayLogs, todayAbsences]);
+  }, [timetables, dayOfWeek, selectedBuilding, todayLogs]);
 
   const activeIncidentsList = useMemo(() => {
     const severityOrder = { high: 0, medium: 1, low: 2 };
@@ -199,23 +220,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       .slice(0, 6);
   }, [incidents]);
 
-  const slotMap = useMemo(() => {
-    const m = new Map<string, TimetableSlot>();
-    periodSlots.forEach((s) => m.set(s.id, s));
-    return m;
-  }, [periodSlots]);
-
   // Empty initial workspace prompt
   if (timetables.length === 0) {
     return (
-      <div className="bg-white border border-[#E5E1D8] rounded-xl p-6 sm:p-10 max-w-3xl mx-auto mt-4 space-y-6">
+      <div className="bg-white border border-[#E5E1D8] rounded-2xl p-6 sm:p-10 max-w-3xl mx-auto mt-4 space-y-6">
         <div className="space-y-2">
           <p className="text-xs font-semibold text-[#1E5C4B]">初次啟用設定</p>
           <h2 className="text-xl sm:text-2xl font-bold text-[#1F2421]">
-            尚未匯入學校課表資料庫
+            尚未建立 {schoolSettings.schoolName} 班級課表資料
           </h2>
           <p className="text-sm text-[#5C615C] leading-relaxed">
-            校園即時巡堂系統需先連結學校課表，方能自動對應各節次教室、任課教師與應到人數，並啟動缺曠課自動判別演算法。您可以立即匯入內建的完整範例課表與今日巡堂情境，或上傳貴校的 CSV 課表檔案。
+            請先於「基本資料」設定學校名稱與各棟樓名稱，並匯入班級課表，系統即可自動對應各節次班別、授課領域與教師姓名，開始巡堂勾選並產出 Word／PDF 巡堂紀錄表。
           </p>
         </div>
 
@@ -228,20 +243,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               className="min-h-[44px] px-5 py-2.5 bg-[#1E5C4B] hover:bg-[#16473A] disabled:opacity-60 text-white text-sm font-semibold rounded-xl transition-colors inline-flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
             >
               <Database className="w-4 h-4" />
-              {seeding ? '正在建立範例課表與巡堂資料...' : '一鍵匯入範例全校課表與今日巡堂情境'}
+              {seeding ? '正在建立範例課表與巡堂資料...' : '一鍵匯入範例課表（一～六年級）與巡堂情境'}
             </button>
             <button
               type="button"
-              onClick={() => onNavigate('timetable')}
+              onClick={() => onNavigate('basic_data')}
               className="min-h-[44px] px-5 py-2.5 bg-white hover:bg-[#FAF9F5] text-[#3A3F3B] border border-[#DDD8CD] text-sm font-medium rounded-xl transition-colors inline-flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
             >
-              前往手動匯入 CSV 課表
+              前往基本資料設定
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
         ) : (
           <p className="text-xs text-[#9A5B13] bg-[#FBF0E2] border border-[#EBD5B8] rounded-xl px-4 py-3">
-            全校課表資料庫由「管理者」統一匯入維護，請聯繫系統管理者建立課表後即可開始巡堂作業。
+            學校基本資料與班級課表由「管理者」統一維護，請聯繫系統管理者建立課表後即可開始巡堂作業。
           </p>
         )}
       </div>
@@ -253,7 +268,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   return (
     <div className="space-y-6">
       {/* Filter & Time Context Bar */}
-      <section className="bg-white border border-[#E5E1D8] rounded-xl p-4 sm:p-5 space-y-4">
+      <section className="bg-white border border-[#E5E1D8] rounded-2xl p-4 sm:p-5 space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
             <label className="flex items-center gap-2 text-sm text-[#3A3F3B]">
@@ -262,7 +277,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 type="date"
                 value={selectedDate}
                 onChange={(e) => onChangeDate(e.target.value)}
-                className="min-h-[40px] px-3 py-1.5 text-sm font-mono-num bg-[#FAF9F5] border border-[#E5E1D8] rounded-lg text-[#1F2421] focus:outline-none focus:ring-2 focus:ring-[#1E5C4B]/15 focus:border-[#1E5C4B]"
+                className="min-h-[40px] px-3 py-1.5 text-sm font-mono-num bg-[#FAF9F5] border border-[#E5E1D8] rounded-xl text-[#1F2421] focus:outline-none focus:ring-2 focus:ring-[#1E5C4B]/15 focus:border-[#1E5C4B]"
               />
             </label>
             <div className="text-xs text-[#7C7A72] flex items-center gap-2">
@@ -303,7 +318,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 key={p.period}
                 type="button"
                 onClick={() => onChangePeriod(p.period)}
-                className={`min-h-[40px] px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
+                className={`min-h-[40px] px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
                   active
                     ? 'bg-[#1E5C4B] text-white border-[#1E5C4B]'
                     : 'bg-[#FAF9F5] text-[#5C615C] border-[#E5E1D8] hover:bg-[#F2EFE9] hover:text-[#1F2421]'
@@ -321,7 +336,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* 4-Column KPI Summary Strip */}
       <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <div className="bg-white border border-[#E5E1D8] rounded-xl p-5 space-y-3">
+        <div className="bg-white border border-[#E5E1D8] rounded-2xl p-5 space-y-3">
           <div className="flex items-center justify-between text-xs text-[#7C7A72]">
             <span className="font-semibold">本節巡堂進度</span>
             <span className="w-8 h-8 rounded-lg bg-[#E5F2EE] text-[#1E5C4B] flex items-center justify-center">
@@ -343,13 +358,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             />
           </div>
           <p className="text-xs text-[#7C7A72]">
-            尚有 <span className="font-mono-num font-semibold text-[#1F2421]">{Math.max(0, kpis.totalClasses - kpis.patrolledCount)}</span> 個班級待巡查
+            尚有{' '}
+            <span className="font-mono-num font-semibold text-[#1F2421]">
+              {Math.max(0, kpis.totalClasses - kpis.patrolledCount)}
+            </span>{' '}
+            個班級待巡查
           </p>
         </div>
 
-        <div className="bg-white border border-[#E5E1D8] rounded-xl p-5 space-y-3">
+        <div className="bg-white border border-[#E5E1D8] rounded-2xl p-5 space-y-3">
           <div className="flex items-center justify-between text-xs text-[#7C7A72]">
-            <span className="font-semibold">本節課堂正常率</span>
+            <span className="font-semibold">本節教學正常率</span>
             <span className="w-8 h-8 rounded-lg bg-[#EBF4E8] text-[#2E6B32] flex items-center justify-center">
               <UserCheck className="w-4 h-4" />
             </span>
@@ -361,11 +380,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <span className="text-xs text-[#2E6B32] font-semibold">正常／移地</span>
           </div>
           <p className="text-xs text-[#7C7A72] pt-2">
-            依據本節已巡查 <span className="font-mono-num font-semibold text-[#1F2421]">{kpis.patrolledCount}</span> 間教室即時計算
+            依據本節已巡查{' '}
+            <span className="font-mono-num font-semibold text-[#1F2421]">{kpis.patrolledCount}</span>{' '}
+            個班級即時計算
           </p>
         </div>
 
-        <div className="bg-white border border-[#E5E1D8] rounded-xl p-5 space-y-3">
+        <div className="bg-white border border-[#E5E1D8] rounded-2xl p-5 space-y-3">
           <div className="flex items-center justify-between text-xs text-[#7C7A72]">
             <span className="font-semibold">待處理異常事件</span>
             <span className="w-8 h-8 rounded-lg bg-[#FCEBE7] text-[#B8432E] flex items-center justify-center">
@@ -373,11 +394,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </span>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className={`text-2xl font-bold font-mono-num ${kpis.activeIncidentCount > 0 ? 'text-[#B8432E]' : 'text-[#1F2421]'}`}>
+            <span
+              className={`text-2xl font-bold font-mono-num ${
+                kpis.activeIncidentCount > 0 ? 'text-[#B8432E]' : 'text-[#1F2421]'
+              }`}
+            >
               {kpis.activeIncidentCount}
             </span>
             <span className="text-xs text-[#7C7A72]">
-              含緊急 <span className="font-mono-num font-semibold text-[#B8432E]">{kpis.highActiveCount}</span> 件
+              含緊急{' '}
+              <span className="font-mono-num font-semibold text-[#B8432E]">
+                {kpis.highActiveCount}
+              </span>{' '}
+              件
             </span>
           </div>
           <button
@@ -390,76 +419,80 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </button>
         </div>
 
-        <div className="bg-white border border-[#E5E1D8] rounded-xl p-5 space-y-3">
+        <div className="bg-white border border-[#E5E1D8] rounded-2xl p-5 space-y-3">
           <div className="flex items-center justify-between text-xs text-[#7C7A72]">
-            <span className="font-semibold">今日累計缺曠人次</span>
-            <span className="w-8 h-8 rounded-lg bg-[#FBF0E2] text-[#9A5B13] flex items-center justify-center">
-              <Users className="w-4 h-4" />
+            <span className="font-semibold">今日巡堂紀錄統計</span>
+            <span className="w-8 h-8 rounded-lg bg-[#E9ECF7] text-[#354488] flex items-center justify-center">
+              <ClipboardCheck className="w-4 h-4" />
             </span>
           </div>
           <div className="flex items-baseline gap-2">
             <span className="text-2xl font-bold text-[#1F2421] font-mono-num">
-              {kpis.todayAbsenceTotal}
+              {kpis.todayTotalLogs}
             </span>
             <span className="text-xs text-[#7C7A72]">
-              疑似曠課 <span className="font-mono-num font-semibold text-[#9A5B13]">{kpis.todayTruantCount}</span> · 已核假 <span className="font-mono-num font-semibold text-[#245A84]">{kpis.todayExcusedCount}</span>
+              正常勾選{' '}
+              <span className="font-mono-num font-semibold text-[#1E5C4B]">
+                {kpis.todayPositiveChecks}
+              </span>{' '}
+              · 異常{' '}
+              <span className="font-mono-num font-semibold text-[#B8432E]">
+                {kpis.todayIssueChecks}
+              </span>
             </span>
           </div>
           <button
             type="button"
-            onClick={() => onNavigate('timetable')}
+            onClick={() => onNavigate('reports')}
             className="text-xs font-semibold text-[#1E5C4B] hover:text-[#16473A] inline-flex items-center gap-1 pt-1 cursor-pointer"
           >
-            檢視自動缺曠判別明細
+            匯出 Word／PDF 巡堂紀錄表
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>
       </section>
 
-      {/* Dynamic Real-Time Charts Row */}
+      {/* Charts Row */}
       <section className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-        {/* Chart 1: Per-Class Real-Time Attendance Stacked Bar Chart */}
-        <div className="xl:col-span-7 bg-white border border-[#E5E1D8] rounded-xl p-5 space-y-4">
+        {/* Chart 1: 8-Item Patrol Checklist Distribution */}
+        <div className="xl:col-span-7 bg-white border border-[#E5E1D8] rounded-2xl p-5 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
-              <h3 className="text-base font-semibold text-[#1F2421]">
-                各班級出缺席即時動態統計
-              </h3>
+              <h3 className="text-base font-bold text-[#1F2421]">今日巡堂 8 項檢核結果統計</h3>
               <p className="text-xs text-[#7C7A72] mt-0.5">
-                {selectedDate} · {DAY_OF_WEEK_LABELS[dayOfWeek]} · {currentPeriodBell?.label}（同步課表與假單核銷狀態）
+                {selectedDate} · {DAY_OF_WEEK_LABELS[dayOfWeek]}（綠色為教學正常指標、紅橘色為待改善指標）
               </p>
             </div>
             <span className="text-xs text-[#7C7A72] font-mono-num">
-              共 {classStats.length} 班
+              累計 {todayLogs.length} 筆巡堂
             </span>
           </div>
 
-          {classStats.length === 0 ? (
-            <div className="h-[280px] flex items-center justify-center text-sm text-[#7C7A72] border border-dashed border-[#DDD8CD] rounded-lg">
-              本節次於目前篩選樓棟無排定課程
+          {todayLogs.length === 0 ? (
+            <div className="h-[280px] flex items-center justify-center text-sm text-[#7C7A72] border border-dashed border-[#DDD8CD] rounded-xl">
+              本日尚無巡堂紀錄，請至「行動巡堂作業」勾選紀錄
             </div>
           ) : (
             <div className="h-[290px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
-                  data={classStats.map((c) => ({
-                    name: c.className,
-                    實到人數: c.actualCount,
-                    已核假: c.excusedCount,
-                    遲到: c.lateCount,
-                    疑似曠課: c.truantCount,
-                  }))}
-                  margin={{ top: 8, right: 12, left: -12, bottom: 4 }}
+                  data={checklistChartData}
+                  layout="vertical"
+                  margin={{ top: 4, right: 20, left: 10, bottom: 4 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#EAE5DC" vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#EAE5DC" horizontal={false} />
                   <XAxis
-                    dataKey="name"
-                    tick={{ fontSize: 12, fill: '#5C615C' }}
+                    type="number"
+                    allowDecimals={false}
+                    tick={{ fontSize: 11, fill: '#7C7A72' }}
                     axisLine={{ stroke: '#DDD8CD' }}
                     tickLine={false}
                   />
                   <YAxis
-                    tick={{ fontSize: 12, fill: '#7C7A72' }}
+                    type="category"
+                    dataKey="name"
+                    width={148}
+                    tick={{ fontSize: 11, fill: '#3A3F3B' }}
                     axisLine={false}
                     tickLine={false}
                   />
@@ -471,30 +504,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       fontSize: '12px',
                     }}
                   />
-                  <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }} />
-                  <Bar dataKey="實到人數" stackId="a" fill="#1E5C4B" radius={[0, 0, 0, 0]} maxBarSize={38} />
-                  <Bar dataKey="已核假" stackId="a" fill="#2A6496" maxBarSize={38} />
-                  <Bar dataKey="遲到" stackId="a" fill="#C98A2E" maxBarSize={38} />
-                  <Bar dataKey="疑似曠課" stackId="a" fill="#B8432E" radius={[4, 4, 0, 0]} maxBarSize={38} />
+                  <Bar dataKey="次數" radius={[0, 4, 4, 0]} maxBarSize={22}>
+                    {checklistChartData.map((entry, idx) => (
+                      <Cell
+                        key={`cell-${idx}`}
+                        fill={entry.group === 'positive' ? '#1E5C4B' : '#B8432E'}
+                      />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
           )}
         </div>
 
-        {/* Chart 2: Period-by-Period Patrol Coverage & Absence Trend */}
-        <div className="xl:col-span-5 bg-white border border-[#E5E1D8] rounded-xl p-5 space-y-4">
+        {/* Chart 2: Period-by-Period Patrol Coverage & Issues */}
+        <div className="xl:col-span-5 bg-white border border-[#E5E1D8] rounded-2xl p-5 space-y-4">
           <div>
-            <h3 className="text-base font-semibold text-[#1F2421]">
-              今日各節次巡堂與缺曠趨勢
-            </h3>
+            <h3 className="text-base font-bold text-[#1F2421]">今日各節次巡堂進度與異常趨勢</h3>
             <p className="text-xs text-[#7C7A72] mt-0.5">
-              第 1 節至第 8 節已巡查班數、課堂異常與缺曠人次動態
+              第 1 節至第 8 節應巡班數、已完成巡堂與待改善情形
             </p>
           </div>
           <div className="h-[290px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={periodTrendData} margin={{ top: 8, right: 10, left: -16, bottom: 4 }}>
+              <ComposedChart
+                data={periodTrendData}
+                margin={{ top: 8, right: 10, left: -16, bottom: 4 }}
+              >
                 <CartesianGrid strokeDasharray="3 3" stroke="#EAE5DC" vertical={false} />
                 <XAxis
                   dataKey="name"
@@ -517,11 +554,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   }}
                 />
                 <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }} />
-                <Bar dataKey="已巡班數" fill="#1E5C4B" radius={[3, 3, 0, 0]} maxBarSize={22} />
-                <Bar dataKey="巡堂異常" fill="#C98A2E" radius={[3, 3, 0, 0]} maxBarSize={22} />
+                <Bar dataKey="應巡班數" fill="#E5E1D8" radius={[3, 3, 0, 0]} maxBarSize={18} />
+                <Bar dataKey="已巡班數" fill="#1E5C4B" radius={[3, 3, 0, 0]} maxBarSize={18} />
                 <Line
                   type="monotone"
-                  dataKey="缺曠人次"
+                  dataKey="待改善異常"
                   stroke="#B8432E"
                   strokeWidth={2}
                   dot={{ r: 3.5, fill: '#B8432E' }}
@@ -535,14 +572,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* Bottom Split: Live Classroom Status Matrix + Unresolved Incidents Feed */}
       <section className="grid grid-cols-1 xl:grid-cols-12 gap-6">
         {/* Live Classroom Matrix */}
-        <div className="xl:col-span-7 bg-white border border-[#E5E1D8] rounded-xl overflow-hidden">
+        <div className="xl:col-span-7 bg-white border border-[#E5E1D8] rounded-2xl overflow-hidden">
           <div className="px-5 py-4 border-b border-[#E5E1D8] flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-base font-semibold text-[#1F2421]">
-                本節即時教室巡堂狀態
-              </h3>
+              <h3 className="text-base font-bold text-[#1F2421]">本節即時教室巡堂狀態</h3>
               <p className="text-xs text-[#7C7A72] mt-0.5">
-                點擊任一班級即可開啟快速巡堂登錄與點名缺曠作業
+                點擊任一班級即可開啟巡堂檢核勾選單
               </p>
             </div>
             <button
@@ -555,80 +590,79 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
           </div>
 
-          {classStats.length === 0 ? (
-            <div className="p-8 text-center text-sm text-slate-500">
-              此節次目前無排課資料
-            </div>
+          {periodSlots.length === 0 ? (
+            <div className="p-8 text-center text-sm text-[#7C7A72]">此節次目前無排課資料</div>
           ) : (
-            <div className="divide-y divide-slate-100">
-              {classStats.map((item) => {
-                const slot = slotMap.get(item.timetableId);
-                const statusColor =
-                  item.patrolStatus === 'urgent_issue'
-                    ? 'text-red-700'
-                    : item.patrolStatus === 'minor_issue'
-                      ? 'text-amber-700'
-                      : item.patrolStatus === 'normal'
-                        ? 'text-emerald-700'
-                        : item.patrolStatus === 'empty_relocated'
-                          ? 'text-blue-700'
-                          : 'text-slate-400';
-
-                const statusText =
-                  item.patrolStatus === 'unpatrolled'
-                    ? '尚未巡查'
-                    : PATROL_STATUS_LABELS[item.patrolStatus];
+            <div className="divide-y divide-[#F0ECE3]">
+              {periodSlots.map((slot) => {
+                const log = periodLogsBySlot.get(slot.id);
+                const checklist = getEffectiveChecklist(log);
+                const statusColor = !log
+                  ? 'text-[#9A968C]'
+                  : log.status === 'urgent_issue'
+                    ? 'text-[#B44326]'
+                    : log.status === 'minor_issue'
+                      ? 'text-[#9A5B13]'
+                      : log.status === 'empty_relocated'
+                        ? 'text-[#245A84]'
+                        : 'text-[#1E5C4B]';
 
                 return (
                   <button
-                    key={item.timetableId}
+                    key={slot.id}
                     type="button"
-                    onClick={() => slot && onOpenQuickPatrol(slot)}
-                    className="w-full min-h-[60px] px-5 py-3.5 text-left hover:bg-slate-50 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-2 cursor-pointer"
+                    onClick={() => onOpenQuickPatrol(slot)}
+                    className="w-full min-h-[64px] px-5 py-3.5 text-left hover:bg-[#FAF9F5] transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-2 cursor-pointer"
                   >
                     <div className="min-w-0 space-y-0.5">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                        <span>{item.className}</span>
-                        <span className="text-slate-300" aria-hidden="true">·</span>
-                        <span className="font-mono-num text-slate-600 font-medium">{item.roomNumber}</span>
-                        <span className="text-slate-300" aria-hidden="true">·</span>
-                        <span className="text-slate-700 font-medium truncate">{item.subject}</span>
+                      <div className="flex items-center gap-2 text-sm font-bold text-[#1F2421]">
+                        <span>{slot.className}</span>
+                        <span className="text-[#D4CEC2] font-normal" aria-hidden="true">
+                          ·
+                        </span>
+                        <span className="font-mono-num text-[#1E5C4B] font-semibold">
+                          {slot.roomNumber}
+                        </span>
+                        <span className="text-[#D4CEC2] font-normal" aria-hidden="true">
+                          ·
+                        </span>
+                        <span className="text-[#3A3F3B] font-medium truncate">{slot.subject}</span>
                       </div>
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
-                        <span>{item.building}</span>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[#7C7A72]">
+                        <span>{slot.building}</span>
                         <span aria-hidden="true">/</span>
-                        <span>任課：{item.teacherName}</span>
-                        {slot?.isRelocated && slot.locationNote && (
+                        <span>授課：{slot.teacherName}</span>
+                        {slot.isRelocated && slot.locationNote && (
                           <>
                             <span aria-hidden="true">/</span>
-                            <span className="text-blue-700 inline-flex items-center gap-1">
+                            <span className="text-[#245A84] inline-flex items-center gap-1">
                               <MapPin className="w-3 h-3" />
                               {slot.locationNote}
                             </span>
                           </>
                         )}
                       </div>
+                      {log && checklist.length > 0 && (
+                        <p className="text-[11px] text-[#5C615C] truncate pt-0.5">
+                          {checklist.map((k) => `☑ ${PATROL_CHECKLIST_LABELS[k]}`).join(' · ')}
+                        </p>
+                      )}
                     </div>
 
-                    <div className="flex items-center justify-between sm:justify-end gap-5 shrink-0">
-                      <div className="text-right">
-                        <div className="text-xs font-mono-num text-slate-700 font-medium">
-                          實到 {item.actualCount} / {item.expectedCount}
-                        </div>
-                        <div className="text-[11px] text-slate-500 font-mono-num">
-                          {item.truantCount > 0 ? (
-                            <span className="text-red-700 font-medium">曠課 {item.truantCount}</span>
+                    <div className="flex items-center justify-end gap-3 shrink-0">
+                      <div
+                        className={`text-xs font-semibold flex items-center gap-1.5 min-w-[84px] justify-end ${statusColor}`}
+                      >
+                        {log ? (
+                          log.status === 'urgent_issue' || log.status === 'minor_issue' ? (
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                           ) : (
-                            <span>無曠課</span>
-                          )}
-                          {item.excusedCount > 0 && ` · 核假 ${item.excusedCount}`}
-                        </div>
-                      </div>
-                      <div className={`text-xs font-semibold flex items-center gap-1.5 min-w-[82px] justify-end ${statusColor}`}>
-                        {item.patrolStatus === 'urgent_issue' && <AlertTriangle className="w-3.5 h-3.5 shrink-0" />}
-                        {item.patrolStatus === 'normal' && <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />}
-                        {item.patrolStatus === 'unpatrolled' && <Clock className="w-3.5 h-3.5 shrink-0" />}
-                        <span>{statusText}</span>
+                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                          )
+                        ) : (
+                          <Clock className="w-3.5 h-3.5 shrink-0" />
+                        )}
+                        <span>{log ? PATROL_STATUS_LABELS[log.status] : '尚未巡查'}</span>
                       </div>
                     </div>
                   </button>
@@ -639,15 +673,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
 
         {/* Active Abnormal Incidents List */}
-        <div className="xl:col-span-5 bg-white border border-[#E5E1D8] rounded-xl overflow-hidden flex flex-col">
+        <div className="xl:col-span-5 bg-white border border-[#E5E1D8] rounded-2xl overflow-hidden flex flex-col">
           <div className="px-5 py-4 border-b border-[#E5E1D8] flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-base font-semibold text-[#1F2421]">
-                異常事件即時追蹤列表
-              </h3>
-              <p className="text-xs text-[#7C7A72] mt-0.5">
-                待處理與處理中之通報（依嚴重度優先排序）
-              </p>
+              <h3 className="text-base font-bold text-[#1F2421]">異常事件即時追蹤列表</h3>
+              <p className="text-xs text-[#7C7A72] mt-0.5">待處理與處理中之通報（依嚴重度排序）</p>
             </div>
             <button
               type="button"
@@ -661,54 +691,54 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           {activeIncidentsList.length === 0 ? (
             <div className="p-8 text-center space-y-2 my-auto">
-              <CheckCircle2 className="w-7 h-7 text-emerald-600 mx-auto" />
-              <p className="text-sm font-medium text-slate-900">目前無待處理異常事件</p>
-              <p className="text-xs text-slate-500">所有通報事件均已結案歸檔</p>
+              <CheckCircle2 className="w-7 h-7 text-[#1E5C4B] mx-auto" />
+              <p className="text-sm font-medium text-[#1F2421]">目前無待處理異常事件</p>
+              <p className="text-xs text-[#7C7A72]">所有通報事件均已結案歸檔</p>
             </div>
           ) : (
-            <div className="divide-y divide-slate-100">
+            <div className="divide-y divide-[#F0ECE3]">
               {activeIncidentsList.map((inc) => {
                 const overdue = isIncidentOverdueEscalation(inc);
                 const elapsed = getIncidentElapsedMinutes(inc);
                 const sevColor =
                   inc.severity === 'high'
-                    ? 'text-red-700'
+                    ? 'text-[#B44326]'
                     : inc.severity === 'medium'
-                      ? 'text-amber-700'
-                      : 'text-slate-600';
+                      ? 'text-[#9A5B13]'
+                      : 'text-[#5C615C]';
 
                 return (
                   <button
                     key={inc.id}
                     type="button"
                     onClick={() => onNavigate('incidents')}
-                    className="w-full px-5 py-4 text-left hover:bg-slate-50 transition-colors space-y-1.5 cursor-pointer"
+                    className="w-full px-5 py-4 text-left hover:bg-[#FAF9F5] transition-colors space-y-1.5 cursor-pointer"
                   >
                     <div className="flex items-center justify-between gap-2 text-xs">
                       <span className={`font-semibold inline-flex items-center gap-1 ${sevColor}`}>
                         <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                         {INCIDENT_SEVERITY_LABELS[inc.severity]}
-                        <span className="text-slate-300 font-normal" aria-hidden="true">·</span>
-                        <span className="text-slate-600 font-normal">
+                        <span className="text-[#D4CEC2] font-normal" aria-hidden="true">
+                          ·
+                        </span>
+                        <span className="text-[#5C615C] font-normal">
                           {INCIDENT_CATEGORY_LABELS[inc.category]}
                         </span>
                       </span>
-                      <span className="text-slate-500 font-mono-num shrink-0">
+                      <span className="text-[#7C7A72] font-mono-num shrink-0">
                         {INCIDENT_STATUS_LABELS[inc.status]}
                         {elapsed > 0 ? ` · ${elapsed} 分前` : ' · 剛剛'}
                       </span>
                     </div>
 
-                    <p className="text-sm font-semibold text-slate-900 line-clamp-1">
-                      {inc.title}
-                    </p>
+                    <p className="text-sm font-semibold text-[#1F2421] line-clamp-1">{inc.title}</p>
 
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#7C7A72]">
                       <span>
                         {inc.location} · 通報人：{inc.reporterName}
                       </span>
                       {overdue && (
-                        <span className="text-red-700 font-semibold">
+                        <span className="text-[#B44326] font-semibold">
                           逾時未接手・需升級提醒
                         </span>
                       )}
