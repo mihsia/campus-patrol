@@ -125,24 +125,24 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
   return (
     <div className="space-y-5">
       {/* Mobile & Desktop Quick Filter Header */}
-      <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3.5">
+      <div className="bg-white border border-[#E5E1D8] rounded-xl p-4 sm:p-5 space-y-3.5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-slate-900">
+            <h2 className="text-base font-bold text-[#1F2421]">
               即時行動巡堂作業
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-[#7C7A72] mt-0.5">
               {selectedDate} · {DAY_OF_WEEK_LABELS[dayOfWeek]} · 點擊教室卡片單手完成檢核、缺曠點名與異常通報
             </p>
           </div>
           <div className="relative w-full sm:w-64">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Search className="w-4 h-4 text-[#9A968C] absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="搜尋班級、教室、教師或科目..."
-              className="w-full min-h-[42px] pl-9 pr-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-600/20 focus:border-teal-700"
+              className="w-full min-h-[42px] pl-9 pr-3 py-2 text-sm bg-[#FAF9F5] border border-[#E5E1D8] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1E5C4B]/15 focus:border-[#1E5C4B]"
             />
           </div>
         </div>
@@ -154,10 +154,10 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
               key={p.period}
               type="button"
               onClick={() => onChangePeriod(p.period)}
-              className={`min-h-[42px] px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
+              className={`min-h-[42px] px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
                 selectedPeriod === p.period
-                  ? 'bg-teal-700 text-white border-teal-700'
-                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                  ? 'bg-[#1E5C4B] text-white border-[#1E5C4B]'
+                  : 'bg-[#FAF9F5] text-[#5C615C] border-[#E5E1D8] hover:bg-[#F2EFE9]'
               }`}
             >
               <span className="font-mono-num">{p.label}</span>
@@ -166,17 +166,17 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
         </div>
 
         {/* Building + Completion Filter */}
-        <div className="flex flex-wrap items-center justify-between gap-2.5 pt-1 border-t border-slate-100">
+        <div className="flex flex-wrap items-center justify-between gap-2.5 pt-2 border-t border-[#F0ECE3]">
           <div className="flex items-center gap-1 overflow-x-auto">
             {buildings.map((b) => (
               <button
                 key={b}
                 type="button"
                 onClick={() => setBuildingFilter(b)}
-                className={`min-h-[38px] px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`min-h-[38px] px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                   buildingFilter === b
-                    ? 'bg-slate-900 text-white'
-                    : 'text-slate-600 hover:bg-slate-100'
+                    ? 'bg-[#1F2421] text-white'
+                    : 'text-[#5C615C] hover:bg-[#F2EFE9]'
                 }`}
               >
                 {b === 'ALL' ? '全部樓棟' : b}
@@ -184,7 +184,7 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
             ))}
           </div>
 
-          <div className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+          <div className="inline-flex items-center gap-1 p-1 bg-[#F2EFE9] rounded-xl">
             {(
               [
                 ['all', '全部教室'],
@@ -196,10 +196,10 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
                 key={key}
                 type="button"
                 onClick={() => setStatusFilter(key)}
-                className={`min-h-[34px] px-3 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`min-h-[34px] px-3 py-1 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                   statusFilter === key
-                    ? 'bg-white text-slate-900 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-[#1E5C4B] text-white shadow-xs'
+                    : 'text-[#5C615C] hover:text-[#1F2421]'
                 }`}
               >
                 {label}
@@ -241,14 +241,14 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
                 key={slot.id}
                 type="button"
                 onClick={() => onSelectSlot(slot)}
-                className="bg-white border border-slate-200 hover:border-teal-600 rounded-xl p-4 text-left transition-colors flex flex-col justify-between gap-3.5 min-h-[144px] cursor-pointer active:scale-[0.99]"
+                className="bg-white border border-[#E5E1D8] hover:border-[#1E5C4B] rounded-xl p-4 text-left transition-colors flex flex-col justify-between gap-3.5 min-h-[144px] cursor-pointer active:scale-[0.99]"
               >
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-base font-bold text-slate-900">
+                    <div className="flex items-center gap-2 text-base font-bold text-[#1F2421]">
                       <span>{slot.className}</span>
-                      <span className="text-slate-300 font-normal" aria-hidden="true">/</span>
-                      <span className="font-mono-num text-teal-800">{slot.roomNumber}</span>
+                      <span className="text-[#D4CEC2] font-normal" aria-hidden="true">/</span>
+                      <span className="font-mono-num text-[#1E5C4B]">{slot.roomNumber}</span>
                     </div>
                     <span className={`text-xs font-semibold inline-flex items-center gap-1 whitespace-nowrap shrink-0 ${statusColor}`}>
                       {log ? (
@@ -295,7 +295,7 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
                     {slotLeaves.length > 0 && <span className="text-blue-700 mr-2">核假 {slotLeaves.length}</span>}
                     {slotAbsences.length > 0 && <span className="text-red-700 font-medium">缺曠 {slotAbsences.length}</span>}
                     {slotLeaves.length === 0 && slotAbsences.length === 0 && (
-                      <span className="text-teal-700 font-medium">{log ? '更新巡查' : '開始巡查'}</span>
+                      <span className="text-[#1E5C4B] font-semibold">{log ? '更新巡查' : '開始巡查'}</span>
                     )}
                   </span>
                 </div>
@@ -576,14 +576,14 @@ const QuickPatrolDrawer: React.FC<QuickPatrolDrawerProps> = ({
                         setIncidentSeverity('high');
                       }
                     }}
-                    className={`min-h-[46px] px-3 py-2 rounded-xl text-xs sm:text-sm font-medium border text-left transition-colors cursor-pointer ${
+                    className={`min-h-[46px] px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold border text-left transition-colors cursor-pointer ${
                       active
                         ? val === 'urgent_issue'
-                          ? 'bg-red-700 text-white border-red-700'
+                          ? 'bg-[#B44326] text-white border-[#B44326]'
                           : val === 'minor_issue'
-                            ? 'bg-amber-600 text-white border-amber-600'
-                            : 'bg-teal-700 text-white border-teal-700'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                            ? 'bg-[#C98A2E] text-white border-[#C98A2E]'
+                            : 'bg-[#1E5C4B] text-white border-[#1E5C4B]'
+                        : 'bg-white text-[#3A3F3B] border-[#E5E1D8] hover:bg-[#FAF9F5]'
                     }`}
                   >
                     {label}
@@ -849,7 +849,7 @@ const QuickPatrolDrawer: React.FC<QuickPatrolDrawerProps> = ({
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="記錄教學秩序、冷氣設備、代課情形或其他備註..."
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-teal-600/20 focus:border-teal-700"
+              className="w-full px-3 py-2 text-sm border border-[#E5E1D8] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#1E5C4B]/15 focus:border-[#1E5C4B]"
             />
           </div>
 
@@ -913,7 +913,7 @@ const QuickPatrolDrawer: React.FC<QuickPatrolDrawerProps> = ({
             <button
               type="submit"
               disabled={submitting}
-              className="min-h-[46px] px-6 py-2.5 bg-teal-700 hover:bg-teal-800 disabled:opacity-60 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer"
+              className="min-h-[46px] px-6 py-2.5 bg-[#1E5C4B] hover:bg-[#16473A] disabled:opacity-60 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer"
             >
               {submitting ? '正在儲存同步...' : '完成巡堂並即時同步'}
             </button>

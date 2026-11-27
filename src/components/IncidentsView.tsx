@@ -162,21 +162,21 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
       {/* Main Layout: Left Incidents List + Right Push Notification Dispatch Engine */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
         {/* Left: Incidents Table / Cards */}
-        <div className="xl:col-span-8 bg-white border border-slate-200 rounded-xl overflow-hidden">
-          <div className="p-4 sm:p-5 border-b border-slate-200 space-y-4">
+        <div className="xl:col-span-8 bg-white border border-[#E5E1D8] rounded-xl overflow-hidden">
+          <div className="p-4 sm:p-5 border-b border-[#E5E1D8] space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <h2 className="text-base font-semibold text-slate-900">
+                <h2 className="text-base font-bold text-[#1F2421]">
                   異常事件通報與處置清冊
                 </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
+                <p className="text-xs text-[#7C7A72] mt-0.5">
                   即時跨裝置同步通報紀錄；已結案事件自動鎖定狀態以確保稽核完整性
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setShowCreateModal(true)}
-                className="min-h-[42px] px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white text-xs sm:text-sm font-medium rounded-lg inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                className="min-h-[42px] px-4 py-2 bg-[#1E5C4B] hover:bg-[#16473A] text-white text-xs sm:text-sm font-semibold rounded-xl inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
               >
                 <Plus className="w-4 h-4" />
                 新增異常通報
@@ -184,7 +184,7 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-2.5">
-              <div className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-lg overflow-x-auto">
+              <div className="inline-flex items-center gap-1 p-1 bg-[#F2EFE9] rounded-xl overflow-x-auto">
                 {(
                   [
                     ['all', '全部狀態'],
@@ -197,8 +197,8 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
                     key={k}
                     type="button"
                     onClick={() => setStatusFilter(k)}
-                    className={`min-h-[34px] px-3 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                      statusFilter === k ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                    className={`min-h-[34px] px-3 py-1 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                      statusFilter === k ? 'bg-[#1E5C4B] text-white shadow-xs' : 'text-[#5C615C] hover:text-[#1F2421]'
                     }`}
                   >
                     {label}
@@ -206,7 +206,7 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
                 ))}
               </div>
 
-              <div className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-lg overflow-x-auto">
+              <div className="inline-flex items-center gap-1 p-1 bg-[#F2EFE9] rounded-xl overflow-x-auto">
                 {(
                   [
                     ['all', '全部等級'],
@@ -219,8 +219,8 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
                     key={k}
                     type="button"
                     onClick={() => setSeverityFilter(k)}
-                    className={`min-h-[34px] px-3 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                      severityFilter === k ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                    className={`min-h-[34px] px-3 py-1 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                      severityFilter === k ? 'bg-[#1E5C4B] text-white shadow-xs' : 'text-[#5C615C] hover:text-[#1F2421]'
                     }`}
                   >
                     {label}
@@ -287,7 +287,7 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
                         {inc.handlerName && (
                           <>
                             <span aria-hidden="true">/</span>
-                            <span className="text-teal-800 font-medium">承辦：{inc.handlerName}</span>
+                            <span className="text-[#1E5C4B] font-semibold">承辦：{inc.handlerName}</span>
                           </>
                         )}
                       </div>
@@ -328,26 +328,28 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
 
         {/* Right: Push Notification Dispatch Logic & Personal Preferences */}
         <div className="xl:col-span-4 space-y-5">
-          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+          <div className="bg-white border border-[#E5E1D8] rounded-xl p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <BellRing className="w-4 h-4 text-teal-700" />
-                <h3 className="text-sm font-semibold text-slate-900">即時推播通知設定</h3>
+              <div className="flex items-center gap-2.5">
+                <span className="w-8 h-8 rounded-lg bg-[#FCEBE7] text-[#B8432E] flex items-center justify-center">
+                  <BellRing className="w-4 h-4" />
+                </span>
+                <h3 className="text-sm font-bold text-[#1F2421]">即時推播通知設定</h3>
               </div>
               <button
                 type="button"
                 onClick={handleTestPush}
-                className="text-xs font-medium text-teal-700 hover:text-teal-800 cursor-pointer whitespace-nowrap"
+                className="text-xs font-semibold text-[#1E5C4B] hover:text-[#16473A] cursor-pointer whitespace-nowrap"
               >
                 測試推播
               </button>
             </div>
 
             <div className="space-y-3 text-xs">
-              <div className="flex items-center justify-between gap-3 py-2 border-b border-slate-100">
+              <div className="flex items-center justify-between gap-3 py-2 border-b border-[#F0ECE3]">
                 <div>
-                  <p className="font-medium text-slate-900">瀏覽器系統推播</p>
-                  <p className="text-slate-500 mt-0.5">
+                  <p className="font-semibold text-[#1F2421]">瀏覽器系統推播</p>
+                  <p className="text-[#7C7A72] mt-0.5">
                     權限狀態：{browserPerm === 'granted' ? '已核准' : browserPerm === 'denied' ? '已封鎖' : browserPerm === 'unsupported' ? '不支援' : '尚未設定'}
                   </p>
                 </div>
@@ -360,10 +362,10 @@ export const IncidentsView: React.FC<IncidentsViewProps> = ({
                       void handleEnableBrowserPush();
                     }
                   }}
-                  className={`min-h-[36px] px-3 py-1.5 rounded-lg font-medium whitespace-nowrap cursor-pointer ${
+                  className={`min-h-[36px] px-3 py-1.5 rounded-lg font-semibold whitespace-nowrap cursor-pointer transition-colors ${
                     notifPrefs.browserPushEnabled && browserPerm === 'granted'
-                      ? 'bg-teal-700 text-white'
-                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      ? 'bg-[#1E5C4B] text-white'
+                      : 'bg-[#F2EFE9] text-[#3A3F3B] hover:bg-[#E5E1D8]'
                   }`}
                 >
                   {notifPrefs.browserPushEnabled && browserPerm === 'granted' ? '已開啟' : '開啟推播'}
@@ -662,7 +664,7 @@ const CreateIncidentModal: React.FC<CreateIncidentModalProps> = ({
             <button
               type="submit"
               disabled={submitting}
-              className="min-h-[44px] px-5 py-2 bg-teal-700 hover:bg-teal-800 disabled:opacity-60 text-white text-sm font-semibold rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+              className="min-h-[44px] px-5 py-2 bg-[#1E5C4B] hover:bg-[#16473A] disabled:opacity-60 text-white text-sm font-semibold rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
             >
               <Send className="w-4 h-4" />
               {submitting ? '傳送中...' : '立即送出通報'}
@@ -794,7 +796,7 @@ const IncidentWorkflowModal: React.FC<IncidentWorkflowModalProps> = ({
                   type="button"
                   disabled={saving}
                   onClick={() => handleTransition('resolved', '正式結案歸檔')}
-                  className="min-h-[42px] px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white text-xs sm:text-sm font-semibold rounded-lg cursor-pointer"
+                  className="min-h-[42px] px-4 py-2 bg-[#1E5C4B] hover:bg-[#16473A] text-white text-xs sm:text-sm font-semibold rounded-xl cursor-pointer"
                 >
                   確認結案並鎖定
                 </button>

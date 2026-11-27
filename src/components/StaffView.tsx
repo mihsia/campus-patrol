@@ -173,26 +173,28 @@ export const StaffView: React.FC<StaffViewProps> = ({
   if (!isAdmin) {
     return (
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        <div className="lg:col-span-6 bg-white border border-slate-200 rounded-xl p-5 sm:p-6 space-y-5">
-          <div className="flex items-center gap-2.5">
-            <UserCog className="w-5 h-5 text-teal-700" />
+        <div className="lg:col-span-6 bg-white border border-[#E5E1D8] rounded-xl p-5 sm:p-6 space-y-5">
+          <div className="flex items-center gap-3">
+            <span className="w-9 h-9 rounded-xl bg-[#F6E8EC] text-[#5F2230] flex items-center justify-center shrink-0">
+              <UserCog className="w-5 h-5" />
+            </span>
             <div>
-              <h2 className="text-base font-semibold text-slate-900">個人帳號與權限資料</h2>
-              <p className="text-xs text-slate-500">
+              <h2 className="text-base font-bold text-[#1F2421]">個人帳號與權限資料</h2>
+              <p className="text-xs text-[#7C7A72]">
                 本系統採用 Google 授權帳號登入，巡堂紀錄與異常通報將自動署名您的姓名
               </p>
             </div>
           </div>
 
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
+          <div className="p-4 rounded-xl bg-[#FAF9F5] border border-[#E5E1D8] space-y-2 text-xs">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-slate-500">授權登入 Google 帳號</span>
-              <span className="font-semibold text-emerald-700">使用中</span>
+              <span className="text-[#7C7A72]">授權登入 Google 帳號</span>
+              <span className="font-semibold text-[#1E5C4B]">使用中</span>
             </div>
-            <p className="font-mono-num text-sm font-semibold text-slate-900 break-all">{userEmail}</p>
-            <div className="pt-2 border-t border-slate-200 flex items-center justify-between">
-              <span className="text-slate-500">系統權限層級</span>
-              <span className="font-semibold text-slate-900">
+            <p className="font-mono-num text-sm font-semibold text-[#1F2421] break-all">{userEmail}</p>
+            <div className="pt-2 border-t border-[#E5E1D8] flex items-center justify-between">
+              <span className="text-[#7C7A72]">系統權限層級</span>
+              <span className="font-semibold text-[#1F2421]">
                 {STAFF_ROLE_LABELS[normalizeStaffRole(profile.role)]}
               </span>
             </div>
@@ -239,7 +241,7 @@ export const StaffView: React.FC<StaffViewProps> = ({
             <button
               type="submit"
               disabled={savingProfile}
-              className="w-full min-h-[44px] px-4 py-2.5 bg-teal-700 hover:bg-teal-800 disabled:opacity-60 text-white text-sm font-semibold rounded-lg inline-flex items-center justify-center gap-2 cursor-pointer"
+              className="w-full min-h-[44px] px-4 py-2.5 bg-[#1E5C4B] hover:bg-[#16473A] disabled:opacity-60 text-white text-sm font-semibold rounded-xl inline-flex items-center justify-center gap-2 cursor-pointer transition-colors"
             >
               <CheckCircle2 className="w-4 h-4" />
               {savingProfile ? '儲存中...' : '儲存個人顯示資料'}
@@ -248,7 +250,7 @@ export const StaffView: React.FC<StaffViewProps> = ({
             <button
               type="button"
               onClick={onSignOut}
-              className="lg:hidden w-full min-h-[44px] px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-sm font-medium rounded-lg inline-flex items-center justify-center gap-2 cursor-pointer"
+              className="lg:hidden w-full min-h-[44px] px-4 py-2.5 bg-white hover:bg-[#FAF9F5] text-[#3A3F3B] border border-[#DDD8CD] text-sm font-medium rounded-xl inline-flex items-center justify-center gap-2 cursor-pointer"
             >
               <LogOut className="w-4 h-4" />
               登出目前 Google 帳號
@@ -274,44 +276,44 @@ export const StaffView: React.FC<StaffViewProps> = ({
                 </p>
               </div>
               <div className="py-3 space-y-1">
-                <p className="font-semibold text-teal-800">管理者</p>
-                <p className="text-slate-600 leading-relaxed">
+                <p className="font-semibold text-[#1E5C4B]">管理者</p>
+                <p className="text-[#5C615C] leading-relaxed">
                   擁有完整使用者功能，並額外負責 Google 授權帳號控管（新增、編輯、停用／啟用帳號與指派角色）、全校課表資料庫匯入維護，以及異常結案覆核與刪除權限。
                 </p>
               </div>
             </div>
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+          <div className="bg-white border border-[#E5E1D8] rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-[#E5E1D8] flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Users className="w-4 h-4 text-slate-500" />
-                <h3 className="text-sm font-semibold text-slate-900">
+                <Users className="w-4 h-4 text-[#7C7A72]" />
+                <h3 className="text-sm font-semibold text-[#1F2421]">
                   已登入協作人員（<span className="font-mono-num">{staffList.length}</span> 人）
                 </h3>
               </div>
-              <span className="text-xs text-slate-500">不含個人 Email 隱私</span>
+              <span className="text-xs text-[#7C7A72]">不含個人 Email 隱私</span>
             </div>
-            <div className="divide-y divide-slate-100">
+            <div className="divide-y divide-[#F0ECE3]">
               {staffList.map((member) => (
                 <div
                   key={member.uid}
                   className="px-5 py-3 flex items-center justify-between gap-3 text-sm"
                 >
                   <div>
-                    <p className="font-medium text-slate-900">
+                    <p className="font-medium text-[#1F2421]">
                       {member.displayName}
                       {member.uid === profile.uid && (
-                        <span className="text-xs text-teal-700 ml-1.5">（目前登入）</span>
+                        <span className="text-xs text-[#1E5C4B] ml-1.5">（目前登入）</span>
                       )}
                     </p>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-[#7C7A72]">
                       {member.department} · {member.jobTitle}
                     </p>
                   </div>
                   <span
                     className={`text-xs font-semibold ${
-                      normalizeStaffRole(member.role) === 'admin' ? 'text-teal-800' : 'text-slate-600'
+                      normalizeStaffRole(member.role) === 'admin' ? 'text-[#1E5C4B]' : 'text-[#5C615C]'
                     }`}
                   >
                     {STAFF_ROLE_LABELS[normalizeStaffRole(member.role)]}
@@ -333,8 +335,8 @@ export const StaffView: React.FC<StaffViewProps> = ({
       {/* Header & Primary Action */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div className="space-y-1">
-          <h2 className="text-xl font-bold text-slate-900 tracking-tight">帳號管理</h2>
-          <p className="text-sm text-slate-600">
+          <h2 className="text-xl font-bold text-[#1F2421] tracking-tight">帳號管理</h2>
+          <p className="text-sm text-[#5C615C]">
             帳號依「處室」分類管理，僅限授權之 Google 帳號登入使用（二層次權限：管理者／使用者）
           </p>
         </div>
@@ -343,7 +345,7 @@ export const StaffView: React.FC<StaffViewProps> = ({
           <button
             type="button"
             onClick={() => setShowProfilePanel((prev) => !prev)}
-            className="min-h-[42px] px-3.5 sm:px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs sm:text-sm font-medium rounded-lg inline-flex items-center gap-2 whitespace-nowrap cursor-pointer"
+            className="min-h-[42px] px-3.5 sm:px-4 py-2 bg-white hover:bg-[#FAF9F5] text-[#3A3F3B] border border-[#DDD8CD] text-xs sm:text-sm font-medium rounded-xl inline-flex items-center gap-2 whitespace-nowrap cursor-pointer transition-colors"
           >
             <UserCog className="w-4 h-4" />
             個人設定
@@ -351,7 +353,7 @@ export const StaffView: React.FC<StaffViewProps> = ({
           <button
             type="button"
             onClick={onSignOut}
-            className="lg:hidden min-h-[42px] px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-medium rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+            className="lg:hidden min-h-[42px] px-3.5 py-2 bg-white hover:bg-[#FAF9F5] text-[#3A3F3B] border border-[#DDD8CD] text-xs font-medium rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
           >
             <LogOut className="w-4 h-4" />
             登出
@@ -359,7 +361,7 @@ export const StaffView: React.FC<StaffViewProps> = ({
           <button
             type="button"
             onClick={() => setShowAddModal(true)}
-            className="min-h-[42px] px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white text-xs sm:text-sm font-semibold rounded-lg inline-flex items-center gap-2 whitespace-nowrap cursor-pointer"
+            className="min-h-[42px] px-4 py-2 bg-[#1E5C4B] hover:bg-[#16473A] text-white text-xs sm:text-sm font-semibold rounded-xl inline-flex items-center gap-2 whitespace-nowrap cursor-pointer transition-colors"
           >
             <UserPlus className="w-4 h-4" />
             新增授權 Google 帳號
@@ -433,8 +435,8 @@ export const StaffView: React.FC<StaffViewProps> = ({
       )}
 
       {/* Filter & Search Toolbar */}
-      <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-lg overflow-x-auto">
+      <div className="bg-white border border-[#E5E1D8] rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="inline-flex items-center gap-1 p-1 bg-[#F2EFE9] rounded-xl overflow-x-auto">
           {(
             [
               ['all', `全部帳號（${counts.total}）`],
@@ -447,10 +449,10 @@ export const StaffView: React.FC<StaffViewProps> = ({
               key={id}
               type="button"
               onClick={() => setFilterMode(id)}
-              className={`min-h-[36px] px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+              className={`min-h-[36px] px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                 filterMode === id
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-[#1E5C4B] text-white shadow-xs'
+                  : 'text-[#5C615C] hover:text-[#1F2421]'
               }`}
             >
               {label}
@@ -459,23 +461,23 @@ export const StaffView: React.FC<StaffViewProps> = ({
         </div>
 
         <div className="relative w-full md:w-72">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-[#9A968C] absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="搜尋姓名、Google 帳號或處室..."
-            className="w-full min-h-[40px] pl-9 pr-3 py-1.5 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-600/20 focus:border-teal-700"
+            className="w-full min-h-[40px] pl-9 pr-3 py-1.5 text-sm bg-[#FAF9F5] border border-[#E5E1D8] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1E5C4B]/15 focus:border-[#1E5C4B]"
           />
         </div>
       </div>
 
       {/* Department-Grouped Account Tables */}
       {groupedDepartments.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-xl p-10 text-center space-y-3">
-          <Users className="w-8 h-8 text-slate-400 mx-auto" />
-          <p className="text-sm font-medium text-slate-900">目前沒有符合篩選條件的授權帳號</p>
-          <p className="text-xs text-slate-500">
+        <div className="bg-white border border-[#E5E1D8] rounded-xl p-10 text-center space-y-3">
+          <Users className="w-8 h-8 text-[#9A968C] mx-auto" />
+          <p className="text-sm font-semibold text-[#1F2421]">目前沒有符合篩選條件的授權帳號</p>
+          <p className="text-xs text-[#7C7A72]">
             點擊右上方「新增授權 Google 帳號」即可指派各處室教職員的系統權限
           </p>
         </div>
@@ -484,13 +486,13 @@ export const StaffView: React.FC<StaffViewProps> = ({
           {groupedDepartments.map((group) => (
             <section key={group.department} className="space-y-2.5">
               <div className="flex items-baseline gap-2.5 px-1">
-                <h3 className="text-sm font-bold text-teal-800">{group.department}</h3>
-                <span className="text-xs text-slate-500 font-mono-num">
+                <h3 className="text-sm font-bold text-[#1E5C4B]">{group.department}</h3>
+                <span className="text-xs text-[#7C7A72] font-mono-num">
                   {group.accounts.length} 位帳號
                 </span>
               </div>
 
-              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+              <div className="bg-white border border-[#E5E1D8] rounded-xl overflow-hidden">
                 {/* Mobile Touch Card View (< md) */}
                 <div className="md:hidden divide-y divide-slate-100">
                   {group.accounts.map((acc) => {
@@ -511,15 +513,15 @@ export const StaffView: React.FC<StaffViewProps> = ({
                             <div className="text-sm font-semibold text-slate-900 flex items-center gap-1.5 flex-wrap">
                               <span>{acc.displayName}</span>
                               {isSelf && (
-                                <span className="text-xs font-normal text-teal-700">（目前登入）</span>
+                                <span className="text-xs font-normal text-[#1E5C4B]">（目前登入）</span>
                               )}
                             </div>
-                            <p className="text-xs text-slate-500 mt-0.5">{acc.jobTitle}</p>
+                            <p className="text-xs text-[#7C7A72] mt-0.5">{acc.jobTitle}</p>
                           </div>
                           <div className="text-right shrink-0 text-xs space-y-0.5">
                             <p
                               className={`font-semibold ${
-                                acc.role === 'admin' ? 'text-teal-800' : 'text-slate-700'
+                                acc.role === 'admin' ? 'text-[#1E5C4B]' : 'text-[#5C615C]'
                               }`}
                             >
                               {STAFF_ROLE_LABELS[acc.role]}
@@ -588,7 +590,7 @@ export const StaffView: React.FC<StaffViewProps> = ({
                 <div className="hidden md:block overflow-x-auto">
                   <table className="w-full text-left border-collapse text-sm">
                     <thead>
-                      <tr className="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold text-slate-500">
+                      <tr className="border-b border-[#E5E1D8] bg-[#FAF9F5] text-xs font-semibold text-[#7C7A72]">
                         <th className="py-3 px-4 w-[22%]">姓名／職稱</th>
                         <th className="py-3 px-4 w-[32%]">Google 帳號</th>
                         <th className="py-3 px-4 w-[14%]">權限</th>
@@ -596,7 +598,7 @@ export const StaffView: React.FC<StaffViewProps> = ({
                         <th className="py-3 px-4 text-right w-[18%]">操作</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100">
+                    <tbody className="divide-y divide-[#F0ECE3]">
                       {group.accounts.map((acc) => {
                         const isBootstrap =
                           acc.email.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
@@ -614,17 +616,17 @@ export const StaffView: React.FC<StaffViewProps> = ({
                               <div className="font-semibold text-slate-900 flex items-center gap-1.5 flex-wrap">
                                 <span>{acc.displayName}</span>
                                 {isSelf && (
-                                  <span className="text-xs font-normal text-teal-700">（目前登入）</span>
+                                  <span className="text-xs font-normal text-[#1E5C4B]">（目前登入）</span>
                                 )}
                               </div>
-                              <p className="text-xs text-slate-500 mt-0.5">{acc.jobTitle}</p>
+                              <p className="text-xs text-[#7C7A72] mt-0.5">{acc.jobTitle}</p>
                             </td>
 
                             <td className="py-3.5 px-4 align-middle">
-                              <div className="font-mono-num text-xs sm:text-sm text-slate-700 break-all">
+                              <div className="font-mono-num text-xs sm:text-sm text-[#3A3F3B] break-all">
                                 {acc.email}
                               </div>
-                              <p className="text-[11px] text-slate-400 mt-0.5">
+                              <p className="text-[11px] text-[#9A968C] mt-0.5">
                                 {acc.uid ? '已完成 Google 登入綁定' : '預先授權・尚未初次登入'}
                               </p>
                             </td>
@@ -632,7 +634,7 @@ export const StaffView: React.FC<StaffViewProps> = ({
                             <td className="py-3.5 px-4 align-middle whitespace-nowrap">
                               <span
                                 className={`text-xs sm:text-sm font-semibold ${
-                                  acc.role === 'admin' ? 'text-teal-800' : 'text-slate-700'
+                                  acc.role === 'admin' ? 'text-[#1E5C4B]' : 'text-[#5C615C]'
                                 }`}
                               >
                                 {STAFF_ROLE_LABELS[acc.role]}
@@ -714,9 +716,9 @@ export const StaffView: React.FC<StaffViewProps> = ({
       )}
 
       {/* Two-Tier Permission Reference Footer */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+      <div className="bg-white border border-[#E5E1D8] rounded-xl p-5 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
         <div className="space-y-1">
-          <p className="font-semibold text-teal-800 flex items-center gap-1.5">
+          <p className="font-semibold text-[#1E5C4B] flex items-center gap-1.5">
             <Shield className="w-3.5 h-3.5" />
             管理者權限範圍
           </p>
@@ -996,24 +998,24 @@ const AccountFormModal: React.FC<{
                     onClick={() => setRole(opt.value)}
                     className={`p-3.5 rounded-xl border text-left transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                       selected
-                        ? 'border-teal-700 bg-teal-50/70'
-                        : 'border-slate-200 bg-white hover:bg-slate-50'
+                        ? 'border-[#1E5C4B] bg-[#E5F2EE]/60'
+                        : 'border-[#E5E1D8] bg-white hover:bg-[#FAF9F5]'
                     }`}
                   >
                     <p
                       className={`text-sm font-semibold ${
-                        selected ? 'text-teal-900' : 'text-slate-900'
+                        selected ? 'text-[#1E5C4B]' : 'text-[#1F2421]'
                       }`}
                     >
                       {opt.title}
                     </p>
-                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">{opt.desc}</p>
+                    <p className="text-xs text-[#7C7A72] mt-1 leading-relaxed">{opt.desc}</p>
                   </button>
                 );
               })}
             </div>
             {(isBootstrap || isSelf) && (
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-[#7C7A72]">
                 {isBootstrap
                   ? '主管理者帳號固定為「管理者」權限且不可停用。'
                   : '為避免誤鎖定管理權限，無法自行降級目前登入中的帳號。'}
@@ -1024,8 +1026,8 @@ const AccountFormModal: React.FC<{
           {/* Account Status on Edit */}
           {mode === 'edit' && !isBootstrap && !isSelf && (
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-700 block">帳號狀態</label>
-              <div className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+              <label className="text-xs font-semibold text-[#5C615C] block">帳號狀態</label>
+              <div className="inline-flex items-center gap-1 p-1 bg-[#F2EFE9] rounded-xl">
                 {(
                   [
                     ['active', '使用中'],
@@ -1036,8 +1038,8 @@ const AccountFormModal: React.FC<{
                     key={val}
                     type="button"
                     onClick={() => setStatus(val)}
-                    className={`min-h-[36px] px-4 py-1.5 text-xs font-medium rounded-md cursor-pointer ${
-                      status === val ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
+                    className={`min-h-[36px] px-4 py-1.5 text-xs font-semibold rounded-lg cursor-pointer transition-colors ${
+                      status === val ? 'bg-[#1E5C4B] text-white shadow-xs' : 'text-[#5C615C]'
                     }`}
                   >
                     {label}
@@ -1048,7 +1050,7 @@ const AccountFormModal: React.FC<{
           )}
 
           {error && (
-            <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+            <div className="p-3 rounded-xl bg-[#FCECE6] border border-[#EABEB0] text-xs text-[#B44326]">
               {error}
             </div>
           )}
@@ -1057,14 +1059,14 @@ const AccountFormModal: React.FC<{
             <button
               type="button"
               onClick={onClose}
-              className="min-h-[42px] px-4 text-slate-600 hover:text-slate-900 cursor-pointer"
+              className="min-h-[42px] px-4 text-[#5C615C] hover:text-[#1F2421] cursor-pointer"
             >
               取消
             </button>
             <button
               type="submit"
               disabled={saving}
-              className="min-h-[42px] px-5 bg-teal-700 hover:bg-teal-800 disabled:opacity-60 text-white font-semibold rounded-lg cursor-pointer"
+              className="min-h-[42px] px-5 bg-[#1E5C4B] hover:bg-[#16473A] disabled:opacity-60 text-white font-semibold rounded-xl cursor-pointer transition-colors"
             >
               {saving ? '儲存中...' : mode === 'create' ? '確認新增帳號' : '儲存變更'}
             </button>

@@ -10,17 +10,21 @@ import {
   AlertTriangle,
   Bell,
   BookOpen,
+  CalendarCheck,
+  Check,
   ClipboardCheck,
   FileSpreadsheet,
   LayoutDashboard,
-  LogOut,
-  Users,
+  ShieldAlert,
+  UserRound,
   X,
 } from 'lucide-react';
 import {
   BOOTSTRAP_ADMIN_EMAIL,
   CAMPUS_ID,
+  DAY_OF_WEEK_LABELS,
   detectCurrentPeriod,
+  getDayOfWeekFromDate,
   getTodayDateString,
   INCIDENT_SEVERITY_LABELS,
   normalizeStaffRole,
@@ -57,15 +61,32 @@ import { AccessBlockedScreen, SignInScreen } from './components/SignInScreen';
 import { DashboardView } from './components/DashboardView';
 import { PatrolWorkspaceView } from './components/PatrolWorkspaceView';
 import { IncidentsView } from './components/IncidentsView';
-import { TimetableTruancyView } from './components/TimetableTruancyView';
+import { TimetableTruancyView, type TimetableSubTab } from './components/TimetableTruancyView';
 import { ReportsView } from './components/ReportsView';
 import { StaffView } from './components/StaffView';
 import { OfflineBanner, PWAInstallButton } from './components/PWAInstallButton';
 
-interface NavItemConfig {
+interface SidebarNavItem {
+  key: string;
+  nav: NavSection;
+  subTab?: TimetableSubTab;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  badgeBg: string;
+  badgeText: string;
+  activeRowBg: string;
+  activeText: string;
+  activeBadgeBg: string;
+}
+
+interface SidebarNavGroup {
+  title: string;
+  items: SidebarNavItem[];
+}
+
+interface MobileNavItem {
   id: NavSection;
   label: string;
-  mobileLabel: string;
   icon: React.ComponentType<{ className?: string }>;
 }
 
@@ -77,6 +98,12 @@ interface BlockedInfo {
   department?: string;
 }
 
+function getQuickPeriodsWindow(current: number): number[] {
+  if (current <= 1) return [1, 2, 3];
+  if (current >= 8) return [6, 7, 8];
+  return [current - 1, current, current + 1];
+}
+
 function CampusPatrolApp() {
   const [accessState, setAccessState] = useState<AccessState>('loading');
   const [blockedInfo, setBlockedInfo] = useState<BlockedInfo | null>(null);
@@ -85,9 +112,11 @@ function CampusPatrolApp() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [avatarFailed, setAvatarFailed] = useState(false);
 
   // Navigation & Shared Time Context
   const [activeNav, setActiveNav] = useState<NavSection>('dashboard');
+  const [timetableSubTab, setTimetableSubTab] = useState<TimetableSubTab>('truancy');
   const [selectedDate, setSelectedDate] = useState<string>(getTodayDateString);
   const [selectedPeriod, setSelectedPeriod] = useState<number>(detectCurrentPeriod);
   const [selectedBuilding, setSelectedBuilding] = useState<string>('ALL');
@@ -137,6 +166,7 @@ function CampusPatrolApp() {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
+      setAvatarFailed(false);
       if (!user) {
         setProfile(null);
         setIsAdmin(false);
@@ -446,21 +476,128 @@ function CampusPatrolApp() {
     saveNotificationPrefs(next);
   };
 
-  const navItems: NavItemConfig[] = useMemo(
+  const sidebarGroups: SidebarNavGroup[] = useMemo(
     () => [
-      { id: 'dashboard', label: '即時巡堂儀表板', mobileLabel: '儀表板', icon: LayoutDashboard },
-      { id: 'patrol', label: '行動巡堂作業', mobileLabel: '巡堂', icon: ClipboardCheck },
-      { id: 'incidents', label: '異常事件通報', mobileLabel: '通報', icon: Bell },
-      { id: 'timetable', label: '課表與自動缺曠', mobileLabel: '缺曠', icon: BookOpen },
-      { id: 'reports', label: 'PDF／Excel 報表', mobileLabel: '報表', icon: FileSpreadsheet },
       {
-        id: 'staff',
-        label: isAdmin ? '帳號權限管理' : '個人帳號',
-        mobileLabel: '帳號',
-        icon: Users,
+        title: '巡堂與即時',
+        items: [
+          {
+            key: 'dashboard',
+            nav: 'dashboard',
+            label: '即時巡堂儀表板',
+            icon: LayoutDashboard,
+            badgeBg: 'bg-[#EEEAF8]',
+            badgeText: 'text-[#4D358A]',
+            activeRowBg: 'bg-[#EEEAF8]',
+            activeText: 'text-[#4D358A]',
+            activeBadgeBg: 'bg-[#4D358A]',
+          },
+          {
+            key: 'patrol',
+            nav: 'patrol',
+            label: '行動巡堂作業',
+            icon: ClipboardCheck,
+            badgeBg: 'bg-[#E5F2EE]',
+            badgeText: 'text-[#1E5C4B]',
+            activeRowBg: 'bg-[#E5F2EE]',
+            activeText: 'text-[#1E5C4B]',
+            activeBadgeBg: 'bg-[#1E5C4B]',
+          },
+          {
+            key: 'incidents',
+            nav: 'incidents',
+            label: '異常事件通報',
+            icon: Bell,
+            badgeBg: 'bg-[#FCEBE7]',
+            badgeText: 'text-[#B8432E]',
+            activeRowBg: 'bg-[#FCEBE7]',
+            activeText: 'text-[#B8432E]',
+            activeBadgeBg: 'bg-[#B8432E]',
+          },
+        ],
+      },
+      {
+        title: '課務與出缺勤',
+        items: [
+          {
+            key: 'truancy',
+            nav: 'timetable',
+            subTab: 'truancy',
+            label: '自動缺曠判別',
+            icon: ShieldAlert,
+            badgeBg: 'bg-[#FBF0E2]',
+            badgeText: 'text-[#9A5B13]',
+            activeRowBg: 'bg-[#FBF0E2]',
+            activeText: 'text-[#9A5B13]',
+            activeBadgeBg: 'bg-[#9A5B13]',
+          },
+          {
+            key: 'timetable',
+            nav: 'timetable',
+            subTab: 'timetable',
+            label: '學校課表資料庫',
+            icon: BookOpen,
+            badgeBg: 'bg-[#E7F0F8]',
+            badgeText: 'text-[#245A84]',
+            activeRowBg: 'bg-[#E7F0F8]',
+            activeText: 'text-[#245A84]',
+            activeBadgeBg: 'bg-[#245A84]',
+          },
+          {
+            key: 'leaves',
+            nav: 'timetable',
+            subTab: 'leaves',
+            label: '核准假單核銷',
+            icon: CalendarCheck,
+            badgeBg: 'bg-[#EBF4E8]',
+            badgeText: 'text-[#2E6B32]',
+            activeRowBg: 'bg-[#EBF4E8]',
+            activeText: 'text-[#2E6B32]',
+            activeBadgeBg: 'bg-[#2E6B32]',
+          },
+        ],
+      },
+      {
+        title: '報表與管理',
+        items: [
+          {
+            key: 'reports',
+            nav: 'reports',
+            label: '報表匯出',
+            icon: FileSpreadsheet,
+            badgeBg: 'bg-[#E9ECF7]',
+            badgeText: 'text-[#354488]',
+            activeRowBg: 'bg-[#E9ECF7]',
+            activeText: 'text-[#354488]',
+            activeBadgeBg: 'bg-[#354488]',
+          },
+          {
+            key: 'staff',
+            nav: 'staff',
+            label: isAdmin ? '帳號管理' : '個人帳號',
+            icon: UserRound,
+            badgeBg: 'bg-[#F6E8EC]',
+            badgeText: 'text-[#5F2230]',
+            activeRowBg: 'bg-[#F6E8EC]',
+            activeText: 'text-[#5F2230]',
+            activeBadgeBg: 'bg-[#5F2230]',
+          },
+        ],
       },
     ],
     [isAdmin]
+  );
+
+  const mobileNavItems: MobileNavItem[] = useMemo(
+    () => [
+      { id: 'dashboard', label: '儀表板', icon: LayoutDashboard },
+      { id: 'patrol', label: '巡堂', icon: ClipboardCheck },
+      { id: 'incidents', label: '通報', icon: Bell },
+      { id: 'timetable', label: '缺曠', icon: BookOpen },
+      { id: 'reports', label: '報表', icon: FileSpreadsheet },
+      { id: 'staff', label: '帳號', icon: UserRound },
+    ],
+    []
   );
 
   const openHighIncidentCount = useMemo(
@@ -473,12 +610,15 @@ function CampusPatrolApp() {
     [incidents]
   );
 
+  const quickPeriods = useMemo(() => getQuickPeriodsWindow(selectedPeriod), [selectedPeriod]);
+  const selectedDayLabel = DAY_OF_WEEK_LABELS[getDayOfWeekFromDate(selectedDate)];
+
   if (accessState === 'loading') {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-        <div className="text-center space-y-2">
-          <div className="w-8 h-8 border-2 border-teal-700 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-sm text-slate-600">正在驗證 Google 授權帳號與校園資料庫...</p>
+      <div className="min-h-screen bg-[#F6F4EE] flex items-center justify-center p-6">
+        <div className="text-center space-y-2.5">
+          <div className="w-8 h-8 border-2 border-[#1E5C4B] border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-sm text-[#5C615C]">正在驗證 Google 授權帳號與校園資料庫...</p>
         </div>
       </div>
     );
@@ -507,279 +647,380 @@ function CampusPatrolApp() {
     );
   }
 
-  const currentNavMeta = navItems.find((n) => n.id === activeNav) ?? navItems[0];
+  const userInitial = (profile.displayName || '師').trim().slice(0, 1);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col lg:flex-row">
-      {/* Desktop Left Sidebar (252px) */}
-      <aside className="no-print hidden lg:flex lg:flex-col lg:w-[252px] lg:fixed lg:inset-y-0 bg-white border-r border-slate-200 z-30">
-        <div className="h-16 px-5 flex items-center border-b border-slate-200">
-          <span className="text-base font-bold tracking-tight text-slate-900 whitespace-nowrap">
-            CampusPatrol 巡堂通
-          </span>
+    <div className="min-h-screen bg-[#F6F4EE] text-[#1F2421] flex flex-col">
+      {/* Unified Full-Width Top Header Bar (Matches Reference School System UX) */}
+      <header className="no-print sticky top-0 z-30 pt-safe min-h-[56px] lg:h-[68px] bg-white border-b border-[#E5E1D8] px-3.5 sm:px-6 flex items-center justify-between gap-3">
+        {/* Left: Emblem + System Title + Contextual Status Callout */}
+        <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+          <button
+            type="button"
+            onClick={() => setActiveNav('dashboard')}
+            className="flex items-center gap-2.5 sm:gap-3 text-left group cursor-pointer shrink-0"
+          >
+            <span className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-[#1E5C4B] flex items-center justify-center shrink-0">
+              <span className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-[#C98A2E] flex items-center justify-center">
+                <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#FAF9F5] stroke-[3]" />
+              </span>
+            </span>
+            <span className="text-[15px] sm:text-lg font-bold tracking-tight text-[#1F2421] group-hover:text-[#1E5C4B] transition-colors whitespace-nowrap">
+              校園即時巡堂系統
+            </span>
+          </button>
+
+          {openHighIncidentCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => setActiveNav('incidents')}
+              className="hidden md:inline-flex items-center gap-1.5 min-h-[34px] px-3 py-1.5 rounded-lg bg-[#FCECE6] hover:bg-[#F8DFD6] text-[#B44326] text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer"
+            >
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                緊急異常待處理：<span className="font-mono-num">{openHighIncidentCount}</span> 件 · 前往處置
+              </span>
+            </button>
+          ) : (
+            <span className="hidden xl:inline-flex items-center gap-1.5 text-xs text-[#7C7A72] font-mono-num whitespace-nowrap">
+              <span>{selectedDate}</span>
+              <span aria-hidden="true">·</span>
+              <span>{selectedDayLabel}</span>
+              <span aria-hidden="true">·</span>
+              <span className="text-[#1E5C4B] font-semibold">第 {selectedPeriod} 節巡堂中</span>
+            </span>
+          )}
         </div>
 
-        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const active = activeNav === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setActiveNav(item.id)}
-                className={`w-full min-h-[42px] px-3.5 py-2 rounded-lg text-sm font-medium flex items-center justify-between transition-colors cursor-pointer whitespace-nowrap ${
-                  active
-                    ? 'bg-teal-700 text-white'
-                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                }`}
-              >
-                <span className="flex items-center gap-2.5">
-                  <Icon className="w-4 h-4 shrink-0" />
-                  <span>{item.label}</span>
-                </span>
-                {item.id === 'incidents' && openTotalIncidentCount > 0 && (
-                  <span
-                    className={`text-xs font-mono-num font-semibold ${
-                      active ? 'text-teal-100' : 'text-red-700'
-                    }`}
-                  >
-                    {openTotalIncidentCount}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </nav>
+        {/* Right: Quick-Period Segmented Switcher + PWA Install + User Profile & Logout */}
+        <div className="flex items-center gap-2.5 sm:gap-4 shrink-0">
+          {/* Quick Period Segmented Pill (Warm Sand Track + Deep Forest Active) */}
+          <div
+            role="group"
+            aria-label="快速切換巡堂節次"
+            className="hidden md:inline-flex items-center gap-1 p-1 bg-[#F2EFE9] rounded-xl"
+          >
+            {quickPeriods.map((periodNum) => {
+              const isSelected = selectedPeriod === periodNum;
+              return (
+                <button
+                  key={periodNum}
+                  type="button"
+                  onClick={() => setSelectedPeriod(periodNum)}
+                  className={`min-h-[34px] px-3.5 py-1 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer font-mono-num ${
+                    isSelected
+                      ? 'bg-[#1E5C4B] text-white shadow-xs'
+                      : 'text-[#5C615C] hover:text-[#1F2421]'
+                  }`}
+                >
+                  第{periodNum}節
+                </button>
+              );
+            })}
+          </div>
 
-        <div className="p-4 border-t border-slate-200 space-y-3">
-          <div className="min-w-0 space-y-0.5">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-semibold text-slate-900 truncate">{profile.displayName}</p>
-              <span
-                className={`text-xs font-semibold shrink-0 ${
-                  isAdmin ? 'text-teal-800' : 'text-slate-500'
-                }`}
-              >
-                {STAFF_ROLE_LABELS[isAdmin ? 'admin' : 'user']}
-              </span>
+          <div className="lg:hidden">
+            <PWAInstallButton variant="compact" />
+          </div>
+
+          {/* Mobile Urgent Shortcut if High Incidents Exist */}
+          {openHighIncidentCount > 0 && activeNav !== 'incidents' && (
+            <button
+              type="button"
+              onClick={() => setActiveNav('incidents')}
+              aria-label={`有 ${openHighIncidentCount} 件緊急異常待處理`}
+              className="md:hidden min-h-[36px] px-2.5 py-1 text-xs font-semibold text-[#B44326] bg-[#FCECE6] rounded-lg inline-flex items-center gap-1 whitespace-nowrap cursor-pointer"
+            >
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              <span className="font-mono-num">{openHighIncidentCount}</span>
+            </button>
+          )}
+
+          {/* User Avatar + Name + Role · Logout (Directly Matching Reference Header) */}
+          <div className="flex items-center gap-2.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setActiveNav('staff')}
+              aria-label="檢視個人帳號設定"
+              className="w-9 h-9 rounded-full overflow-hidden bg-[#1E5C4B] text-[#FAF9F5] font-bold text-xs flex items-center justify-center shrink-0 border border-[#E5E1D8] cursor-pointer"
+            >
+              {firebaseUser.photoURL && !avatarFailed ? (
+                <img
+                  src={firebaseUser.photoURL}
+                  alt={profile.displayName}
+                  referrerPolicy="no-referrer"
+                  onError={() => setAvatarFailed(true)}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span>{userInitial}</span>
+              )}
+            </button>
+
+            <div className="hidden sm:block text-left leading-tight">
+              <p className="text-sm font-bold text-[#1F2421] whitespace-nowrap max-w-[132px] truncate">
+                {profile.displayName}
+              </p>
+              <div className="flex items-center gap-1.5 text-xs text-[#7C7A72] mt-0.5 whitespace-nowrap">
+                <span>{STAFF_ROLE_LABELS[isAdmin ? 'admin' : 'user']}</span>
+                <span aria-hidden="true">·</span>
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  className="hover:text-[#B44326] transition-colors cursor-pointer"
+                >
+                  登出
+                </button>
+              </div>
             </div>
-            <p className="text-xs text-slate-500 truncate">
+          </div>
+        </div>
+      </header>
+
+      {/* Body Layout: Warm Ivory Grouped Left Sidebar + Warm Linen Workspace */}
+      <div className="flex-1 flex min-w-0">
+        {/* Desktop Grouped Sidebar (248px, Warm Ivory #FAF9F5) */}
+        <aside className="no-print hidden lg:flex lg:flex-col lg:w-[248px] lg:fixed lg:top-[68px] lg:bottom-0 lg:left-0 bg-[#FAF9F5] border-r border-[#E5E1D8] z-20">
+          <nav
+            aria-label="主功能選單"
+            className="flex-1 px-3 py-4 space-y-5 overflow-y-auto"
+          >
+            {sidebarGroups.map((group) => (
+              <div key={group.title} className="space-y-1">
+                <p className="px-3 pb-1 text-xs font-medium text-[#9A968C]">
+                  {group.title}
+                </p>
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  const active = item.subTab
+                    ? activeNav === 'timetable' && timetableSubTab === item.subTab
+                    : activeNav === item.nav;
+
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => {
+                        setActiveNav(item.nav);
+                        if (item.subTab) {
+                          setTimetableSubTab(item.subTab);
+                        }
+                      }}
+                      className={`w-full min-h-[44px] px-2.5 py-1.5 rounded-xl text-[14px] flex items-center justify-between gap-2 transition-colors cursor-pointer whitespace-nowrap ${
+                        active
+                          ? `${item.activeRowBg} ${item.activeText} font-bold`
+                          : 'text-[#3A3F3B] font-medium hover:bg-[#F2EFE9]'
+                      }`}
+                    >
+                      <span className="flex items-center gap-3 min-w-0">
+                        <span
+                          className={`w-8 h-8 rounded-[10px] flex items-center justify-center shrink-0 transition-colors ${
+                            active
+                              ? `${item.activeBadgeBg} text-white`
+                              : `${item.badgeBg} ${item.badgeText}`
+                          }`}
+                        >
+                          <Icon className="w-4 h-4" />
+                        </span>
+                        <span className="truncate">{item.label}</span>
+                      </span>
+
+                      {item.key === 'incidents' && openTotalIncidentCount > 0 && (
+                        <span
+                          className={`text-xs font-mono-num font-bold pr-1 ${
+                            active ? item.activeText : 'text-[#B8432E]'
+                          }`}
+                        >
+                          {openTotalIncidentCount}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </nav>
+
+          {/* Quiet Sidebar Footer with Real PWA Install Action */}
+          <div className="px-4 py-3.5 border-t border-[#E5E1D8] space-y-2.5">
+            <PWAInstallButton variant="sidebar" />
+            <p className="text-center text-xs text-[#9A968C]">
               {profile.department} · {profile.jobTitle}
             </p>
           </div>
-          <PWAInstallButton variant="sidebar" />
-          <button
-            type="button"
-            onClick={handleSignOut}
-            className="w-full min-h-[38px] px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200 rounded-lg inline-flex items-center justify-center gap-1.5 cursor-pointer"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            登出帳號
-          </button>
-        </div>
-      </aside>
+        </aside>
 
-      {/* Main Content Area */}
-      <div className="flex-1 lg:pl-[252px] flex flex-col min-w-0">
-        {/* Compact Top Header (52px on mobile to honor <=15% sticky cap; 64px on desktop) */}
-        <header className="no-print sticky top-0 z-20 pt-safe min-h-[52px] lg:h-16 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="lg:hidden text-sm font-bold text-teal-800 whitespace-nowrap shrink-0">
-              巡堂通
-            </span>
-            <span className="lg:hidden text-slate-300" aria-hidden="true">/</span>
-            <h1 className="text-sm lg:text-base font-semibold text-slate-900 truncate">
-              {currentNavMeta.label}
-            </h1>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            <div className="lg:hidden">
-              <PWAInstallButton variant="compact" />
-            </div>
-            {openHighIncidentCount > 0 && activeNav !== 'incidents' && (
-              <button
-                type="button"
-                onClick={() => setActiveNav('incidents')}
-                className="min-h-[36px] px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
-              >
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                <span className="hidden sm:inline">緊急異常</span>
-                <span className="font-mono-num">{openHighIncidentCount}</span>
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setActiveNav('patrol')}
-              className="min-h-[38px] px-3 sm:px-3.5 py-1.5 bg-teal-700 hover:bg-teal-800 text-white text-xs sm:text-sm font-medium rounded-lg whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              開始巡堂
-            </button>
-          </div>
-        </header>
-
-        {/* Live Push Notification Toast for Newly Triggered Incidents */}
-        {liveAlertToast && (
-          <div className="no-print px-4 sm:px-6 pt-4">
-            <div className="bg-red-50 border border-red-300 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-red-700 shrink-0 mt-0.5" />
-                <div className="text-xs sm:text-sm">
-                  <p className="font-semibold text-red-900">
-                    即時推播通知｜{INCIDENT_SEVERITY_LABELS[liveAlertToast.severity]}：{liveAlertToast.title}
-                  </p>
-                  <p className="text-red-800 mt-0.5">
-                    {liveAlertToast.location} · 通報人：{liveAlertToast.reporterName}
-                  </p>
+        {/* Main Content Area */}
+        <div className="flex-1 lg:pl-[248px] flex flex-col min-w-0">
+          {/* Live Push Notification Toast for Newly Triggered Incidents */}
+          {liveAlertToast && (
+            <div className="no-print px-4 sm:px-6 pt-4">
+              <div className="bg-[#FCECE6] border border-[#EABEB0] rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-[#B44326] shrink-0 mt-0.5" />
+                  <div className="text-xs sm:text-sm">
+                    <p className="font-semibold text-[#7A2716]">
+                      即時推播通知｜{INCIDENT_SEVERITY_LABELS[liveAlertToast.severity]}：{liveAlertToast.title}
+                    </p>
+                    <p className="text-[#9E351E] mt-0.5">
+                      {liveAlertToast.location} · 通報人：{liveAlertToast.reporterName}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLiveAlertToast(null);
+                      setActiveNav('incidents');
+                    }}
+                    className="min-h-[36px] px-3 py-1.5 bg-[#B44326] hover:bg-[#93341C] text-white text-xs font-semibold rounded-lg whitespace-nowrap cursor-pointer"
+                  >
+                    前往處理
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLiveAlertToast(null)}
+                    aria-label="關閉推播提示"
+                    className="min-h-[36px] min-w-[36px] flex items-center justify-center text-[#B44326] hover:bg-[#F8DFD6] rounded-lg cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+            </div>
+          )}
+
+          {/* Action Feedback Toast */}
+          {feedbackBanner && (
+            <div className="no-print px-4 sm:px-6 pt-3">
+              <div className="bg-[#1E5C4B] text-[#FAF9F5] text-xs sm:text-sm px-4 py-3 rounded-xl flex items-center justify-between gap-3">
+                <span>{feedbackBanner}</span>
                 <button
                   type="button"
-                  onClick={() => {
-                    setLiveAlertToast(null);
-                    setActiveNav('incidents');
-                  }}
-                  className="min-h-[36px] px-3 py-1.5 bg-red-700 hover:bg-red-800 text-white text-xs font-semibold rounded-lg whitespace-nowrap cursor-pointer"
-                >
-                  前往處理
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLiveAlertToast(null)}
-                  aria-label="關閉推播提示"
-                  className="min-h-[36px] min-w-[36px] flex items-center justify-center text-red-700 hover:bg-red-100 rounded-lg cursor-pointer"
+                  onClick={() => setFeedbackBanner(null)}
+                  className="text-[#C8DFD7] hover:text-white cursor-pointer"
+                  aria-label="關閉提示"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
             </div>
-          </div>
-        )}
-
-        {/* Action Feedback Toast */}
-        {feedbackBanner && (
-          <div className="no-print px-4 sm:px-6 pt-3">
-            <div className="bg-slate-900 text-white text-xs sm:text-sm px-4 py-3 rounded-xl flex items-center justify-between gap-3">
-              <span>{feedbackBanner}</span>
-              <button
-                type="button"
-                onClick={() => setFeedbackBanner(null)}
-                className="text-slate-300 hover:text-white cursor-pointer"
-                aria-label="關閉提示"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Active View Viewport (bottom padding on mobile clears fixed bottom tab bar) */}
-        <main className="flex-1 p-4 sm:p-6 pb-20 lg:pb-8 max-w-[1440px] w-full mx-auto">
-          {activeNav === 'dashboard' && (
-            <DashboardView
-              selectedDate={selectedDate}
-              selectedPeriod={selectedPeriod}
-              selectedBuilding={selectedBuilding}
-              onChangeDate={setSelectedDate}
-              onChangePeriod={setSelectedPeriod}
-              onChangeBuilding={setSelectedBuilding}
-              timetables={timetables}
-              patrolLogs={patrolLogs}
-              absences={absences}
-              leaveRecords={leaveRecords}
-              incidents={incidents}
-              onOpenQuickPatrol={(slot) => {
-                setQuickPatrolSlot(slot);
-                setActiveNav('patrol');
-              }}
-              onNavigate={setActiveNav}
-              onSeedDemoData={handleSeedDemoData}
-              seeding={seeding}
-              isAdmin={isAdmin}
-            />
           )}
 
-          {activeNav === 'patrol' && (
-            <PatrolWorkspaceView
-              profile={profile}
-              selectedDate={selectedDate}
-              selectedPeriod={selectedPeriod}
-              onChangePeriod={setSelectedPeriod}
-              timetables={timetables}
-              patrolLogs={patrolLogs}
-              absences={absences}
-              leaveRecords={leaveRecords}
-              activeSlot={quickPatrolSlot}
-              onSelectSlot={setQuickPatrolSlot}
-              onActionFeedback={showFeedback}
-            />
-          )}
+          {/* Active View Viewport (bottom padding on mobile clears fixed bottom tab bar) */}
+          <main className="flex-1 p-4 sm:p-6 pb-20 lg:pb-8 max-w-[1360px] w-full mx-auto">
+            {activeNav === 'dashboard' && (
+              <DashboardView
+                selectedDate={selectedDate}
+                selectedPeriod={selectedPeriod}
+                selectedBuilding={selectedBuilding}
+                onChangeDate={setSelectedDate}
+                onChangePeriod={setSelectedPeriod}
+                onChangeBuilding={setSelectedBuilding}
+                timetables={timetables}
+                patrolLogs={patrolLogs}
+                absences={absences}
+                leaveRecords={leaveRecords}
+                incidents={incidents}
+                onOpenQuickPatrol={(slot) => {
+                  setQuickPatrolSlot(slot);
+                  setActiveNav('patrol');
+                }}
+                onNavigate={(section) => {
+                  if (section === 'timetable') {
+                    setTimetableSubTab('truancy');
+                  }
+                  setActiveNav(section);
+                }}
+                onSeedDemoData={handleSeedDemoData}
+                seeding={seeding}
+                isAdmin={isAdmin}
+              />
+            )}
 
-          {activeNav === 'incidents' && (
-            <IncidentsView
-              profile={profile}
-              isAdmin={isAdmin}
-              selectedDate={selectedDate}
-              selectedPeriod={selectedPeriod}
-              timetables={timetables}
-              incidents={incidents}
-              notifPrefs={notifPrefs}
-              onUpdateNotifPrefs={handleUpdateNotifPrefs}
-              onActionFeedback={showFeedback}
-            />
-          )}
+            {activeNav === 'patrol' && (
+              <PatrolWorkspaceView
+                profile={profile}
+                selectedDate={selectedDate}
+                selectedPeriod={selectedPeriod}
+                onChangePeriod={setSelectedPeriod}
+                timetables={timetables}
+                patrolLogs={patrolLogs}
+                absences={absences}
+                leaveRecords={leaveRecords}
+                activeSlot={quickPatrolSlot}
+                onSelectSlot={setQuickPatrolSlot}
+                onActionFeedback={showFeedback}
+              />
+            )}
 
-          {activeNav === 'timetable' && (
-            <TimetableTruancyView
-              profile={profile}
-              isAdmin={isAdmin}
-              selectedDate={selectedDate}
-              timetables={timetables}
-              absences={absences}
-              leaveRecords={leaveRecords}
-              onSeedDemoData={handleSeedDemoData}
-              seeding={seeding}
-              onActionFeedback={showFeedback}
-            />
-          )}
+            {activeNav === 'incidents' && (
+              <IncidentsView
+                profile={profile}
+                isAdmin={isAdmin}
+                selectedDate={selectedDate}
+                selectedPeriod={selectedPeriod}
+                timetables={timetables}
+                incidents={incidents}
+                notifPrefs={notifPrefs}
+                onUpdateNotifPrefs={handleUpdateNotifPrefs}
+                onActionFeedback={showFeedback}
+              />
+            )}
 
-          {activeNav === 'reports' && (
-            <ReportsView
-              selectedDate={selectedDate}
-              timetables={timetables}
-              patrolLogs={patrolLogs}
-              absences={absences}
-              leaveRecords={leaveRecords}
-              incidents={incidents}
-              onActionFeedback={showFeedback}
-            />
-          )}
+            {activeNav === 'timetable' && (
+              <TimetableTruancyView
+                profile={profile}
+                isAdmin={isAdmin}
+                selectedDate={selectedDate}
+                timetables={timetables}
+                absences={absences}
+                leaveRecords={leaveRecords}
+                activeSubTab={timetableSubTab}
+                onChangeSubTab={setTimetableSubTab}
+                onSeedDemoData={handleSeedDemoData}
+                seeding={seeding}
+                onActionFeedback={showFeedback}
+              />
+            )}
 
-          {activeNav === 'staff' && (
-            <StaffView
-              profile={profile}
-              userEmail={firebaseUser.email || ''}
-              isAdmin={isAdmin}
-              allowedAccounts={allowedAccounts}
-              staffList={staffList}
-              onSignOut={handleSignOut}
-              onActionFeedback={showFeedback}
-            />
-          )}
-        </main>
+            {activeNav === 'reports' && (
+              <ReportsView
+                selectedDate={selectedDate}
+                timetables={timetables}
+                patrolLogs={patrolLogs}
+                absences={absences}
+                leaveRecords={leaveRecords}
+                incidents={incidents}
+                onActionFeedback={showFeedback}
+              />
+            )}
+
+            {activeNav === 'staff' && (
+              <StaffView
+                profile={profile}
+                userEmail={firebaseUser.email || ''}
+                isAdmin={isAdmin}
+                allowedAccounts={allowedAccounts}
+                staffList={staffList}
+                onSignOut={handleSignOut}
+                onActionFeedback={showFeedback}
+              />
+            )}
+          </main>
+        </div>
       </div>
 
       <OfflineBanner />
 
-      {/* Mobile Fixed Bottom Tab Bar (56px height + 52px top bar = 108px < 15% of 812px viewport) */}
+      {/* Mobile Fixed Bottom Tab Bar (56px height + 56px top bar = 112px < 15% of 812px viewport) */}
       <nav
         aria-label="行動巡堂主選單"
-        className="no-print lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe"
+        className="no-print lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#FAF9F5]/95 backdrop-blur-md border-t border-[#E5E1D8] pb-safe"
       >
         <div className="grid grid-cols-6 h-14">
-          {navItems.map((item) => {
+          {mobileNavItems.map((item) => {
             const Icon = item.icon;
             const active = activeNav === item.id;
             return (
@@ -787,16 +1028,16 @@ function CampusPatrolApp() {
                 key={item.id}
                 type="button"
                 onClick={() => setActiveNav(item.id)}
-                className={`min-h-[44px] flex flex-col items-center justify-center gap-0.5 relative cursor-pointer ${
-                  active ? 'text-teal-700 font-semibold' : 'text-slate-500'
+                className={`min-h-[44px] flex flex-col items-center justify-center gap-0.5 relative cursor-pointer transition-colors ${
+                  active ? 'text-[#1E5C4B] font-bold' : 'text-[#7C7A72]'
                 }`}
               >
                 <Icon className="w-5 h-5" />
                 <span className="text-[10px] leading-tight whitespace-nowrap">
-                  {item.mobileLabel}
+                  {item.label}
                 </span>
                 {item.id === 'incidents' && openTotalIncidentCount > 0 && (
-                  <span className="absolute top-1 right-2.5 text-[10px] font-mono-num font-bold text-red-700">
+                  <span className="absolute top-1 right-2.5 text-[10px] font-mono-num font-bold text-[#B8432E]">
                     {openTotalIncidentCount}
                   </span>
                 )}

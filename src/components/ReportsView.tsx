@@ -170,11 +170,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   return (
     <div className="space-y-6">
       {/* Export Control Bar (Hidden when printing PDF) */}
-      <div className="no-print bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+      <div className="no-print bg-white border border-[#E5E1D8] rounded-xl p-5 space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
-            <h2 className="text-base font-semibold text-slate-900">PDF 與 Excel 報表匯出中心</h2>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <h2 className="text-base font-bold text-[#1F2421]">PDF 與 Excel 報表匯出中心</h2>
+            <p className="text-xs text-[#7C7A72] mt-0.5">
               即時整合課表、巡堂紀錄、缺曠判別與異常結案資料，一鍵產生多工作表 Excel（.xlsx）或正式 A4 簽核 PDF
             </p>
           </div>
@@ -182,7 +182,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             <button
               type="button"
               onClick={handleExportExcel}
-              className="min-h-[42px] px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white text-xs sm:text-sm font-semibold rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+              className="min-h-[42px] px-4 py-2 bg-[#1E5C4B] hover:bg-[#16473A] text-white text-xs sm:text-sm font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors"
             >
               <FileSpreadsheet className="w-4 h-4" />
               匯出多工作表 Excel (.xlsx)
@@ -190,7 +190,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             <button
               type="button"
               onClick={handleExportCsv}
-              className="min-h-[42px] px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs sm:text-sm font-medium rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+              className="min-h-[42px] px-3.5 py-2 bg-white hover:bg-[#FAF9F5] text-[#3A3F3B] border border-[#DDD8CD] text-xs sm:text-sm font-medium rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors"
             >
               <Download className="w-4 h-4" />
               匯出 CSV
@@ -198,7 +198,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             <button
               type="button"
               onClick={handlePrintPdf}
-              className="min-h-[42px] px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs sm:text-sm font-medium rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+              className="min-h-[42px] px-4 py-2 bg-[#1F2421] hover:bg-[#313834] text-white text-xs sm:text-sm font-medium rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors"
             >
               <Printer className="w-4 h-4" />
               列印／另存 PDF
@@ -206,40 +206,40 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-3 border-t border-slate-100 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-3 border-t border-[#F0ECE3] text-xs">
           <div>
-            <label className="font-semibold text-slate-600 block mb-1">報表抬頭校名</label>
+            <label className="font-semibold text-[#5C615C] block mb-1">報表抬頭校名</label>
             <input
               type="text"
               value={schoolName}
               onChange={(e) => setSchoolName(e.target.value)}
-              className="w-full min-h-[38px] px-3 border border-slate-200 rounded-lg bg-slate-50"
+              className="w-full min-h-[38px] px-3 border border-[#E5E1D8] rounded-lg bg-[#FAF9F5] focus:outline-none focus:border-[#1E5C4B]"
             />
           </div>
           <div>
-            <label className="font-semibold text-slate-600 block mb-1">起始日期</label>
+            <label className="font-semibold text-[#5C615C] block mb-1">起始日期</label>
             <input
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="w-full min-h-[38px] px-3 border border-slate-200 rounded-lg bg-slate-50 font-mono-num"
+              className="w-full min-h-[38px] px-3 border border-[#E5E1D8] rounded-lg bg-[#FAF9F5] font-mono-num focus:outline-none focus:border-[#1E5C4B]"
             />
           </div>
           <div>
-            <label className="font-semibold text-slate-600 block mb-1">結束日期</label>
+            <label className="font-semibold text-[#5C615C] block mb-1">結束日期</label>
             <input
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="w-full min-h-[38px] px-3 border border-slate-200 rounded-lg bg-slate-50 font-mono-num"
+              className="w-full min-h-[38px] px-3 border border-[#E5E1D8] rounded-lg bg-[#FAF9F5] font-mono-num focus:outline-none focus:border-[#1E5C4B]"
             />
           </div>
           <div>
-            <label className="font-semibold text-slate-600 block mb-1">樓棟範圍</label>
+            <label className="font-semibold text-[#5C615C] block mb-1">樓棟範圍</label>
             <select
               value={buildingFilter}
               onChange={(e) => setBuildingFilter(e.target.value)}
-              className="w-full min-h-[38px] px-3 border border-slate-200 rounded-lg bg-slate-50"
+              className="w-full min-h-[38px] px-3 border border-[#E5E1D8] rounded-lg bg-[#FAF9F5] focus:outline-none focus:border-[#1E5C4B]"
             >
               {buildings.map((b) => (
                 <option key={b} value={b}>{b === 'ALL' ? '全校所有樓棟' : b}</option>
@@ -247,11 +247,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </select>
           </div>
           <div>
-            <label className="font-semibold text-slate-600 block mb-1">PDF 預覽版型</label>
+            <label className="font-semibold text-[#5C615C] block mb-1">PDF 預覽版型</label>
             <select
               value={template}
               onChange={(e) => setTemplate(e.target.value as ReportTemplate)}
-              className="w-full min-h-[38px] px-3 border border-slate-200 rounded-lg bg-slate-50"
+              className="w-full min-h-[38px] px-3 border border-[#E5E1D8] rounded-lg bg-[#FAF9F5] focus:outline-none focus:border-[#1E5C4B]"
             >
               <option value="comprehensive">綜合巡堂與缺曠總表</option>
               <option value="truancy">缺曠課自動判別專表</option>
@@ -262,7 +262,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       </div>
 
       {/* Live Formal A4 Printable School Report Preview */}
-      <article className="print-surface bg-white border border-slate-200 rounded-xl p-6 sm:p-10 max-w-5xl mx-auto space-y-8">
+      <article className="print-surface bg-white border border-[#E5E1D8] rounded-xl p-6 sm:p-10 max-w-5xl mx-auto space-y-8">
         {/* Official Report Header */}
         <header className="border-b-2 border-slate-900 pb-4 flex flex-col sm:flex-row sm:items-end justify-between gap-2">
           <div>

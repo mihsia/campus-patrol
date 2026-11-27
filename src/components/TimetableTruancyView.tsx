@@ -46,6 +46,8 @@ import {
   parseTimetableCsv,
 } from '../lib/exportReports';
 
+export type TimetableSubTab = 'truancy' | 'timetable' | 'leaves';
+
 interface TimetableTruancyViewProps {
   profile: StaffProfile;
   isAdmin: boolean;
@@ -53,12 +55,12 @@ interface TimetableTruancyViewProps {
   timetables: TimetableSlot[];
   absences: AbsenceRecord[];
   leaveRecords: LeaveRecord[];
+  activeSubTab: TimetableSubTab;
+  onChangeSubTab: (tab: TimetableSubTab) => void;
   onSeedDemoData: () => Promise<void>;
   seeding: boolean;
   onActionFeedback: (message: string) => void;
 }
-
-type SubTab = 'truancy' | 'timetable' | 'leaves';
 
 export const TimetableTruancyView: React.FC<TimetableTruancyViewProps> = ({
   profile,
@@ -67,11 +69,12 @@ export const TimetableTruancyView: React.FC<TimetableTruancyViewProps> = ({
   timetables,
   absences,
   leaveRecords,
+  activeSubTab: subTab,
+  onChangeSubTab: setSubTab,
   onSeedDemoData,
   seeding,
   onActionFeedback,
 }) => {
-  const [subTab, setSubTab] = useState<SubTab>('truancy');
   const [searchQuery, setSearchQuery] = useState('');
   const [riskFilter, setRiskFilter] = useState<'all' | RiskLevel>('all');
   const [dayFilter, setDayFilter] = useState<number>(0); // 0 = all days
@@ -183,8 +186,8 @@ export const TimetableTruancyView: React.FC<TimetableTruancyViewProps> = ({
   return (
     <div className="space-y-6">
       {/* Sub-navigation + Search */}
-      <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-lg overflow-x-auto">
+      <div className="bg-white border border-[#E5E1D8] rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="inline-flex items-center gap-1 p-1 bg-[#F2EFE9] rounded-xl overflow-x-auto">
           {(
             [
               ['truancy', '自動缺曠判別與查詢', ShieldAlert],
@@ -196,8 +199,10 @@ export const TimetableTruancyView: React.FC<TimetableTruancyViewProps> = ({
               key={id}
               type="button"
               onClick={() => setSubTab(id)}
-              className={`min-h-[38px] px-3.5 py-1.5 text-xs font-medium rounded-md inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
-                subTab === id ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              className={`min-h-[38px] px-3.5 py-1.5 text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                subTab === id
+                  ? 'bg-[#1E5C4B] text-white shadow-xs'
+                  : 'text-[#5C615C] hover:text-[#1F2421]'
               }`}
             >
               <Icon className="w-3.5 h-3.5" />
@@ -207,13 +212,13 @@ export const TimetableTruancyView: React.FC<TimetableTruancyViewProps> = ({
         </div>
 
         <div className="relative w-full md:w-64">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-[#9A968C] absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="搜尋班級、學生、科目或教師..."
-            className="w-full min-h-[40px] pl-9 pr-3 py-1.5 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-600/20 focus:border-teal-700"
+            className="w-full min-h-[40px] pl-9 pr-3 py-1.5 text-sm bg-[#FAF9F5] border border-[#E5E1D8] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1E5C4B]/15 focus:border-[#1E5C4B]"
           />
         </div>
       </div>
@@ -222,17 +227,17 @@ export const TimetableTruancyView: React.FC<TimetableTruancyViewProps> = ({
       {subTab === 'truancy' && (
         <div className="space-y-6">
           {/* Algorithm Pipeline Overview */}
-          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+          <div className="bg-white border border-[#E5E1D8] rounded-xl p-5 space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
-                <h2 className="text-base font-semibold text-slate-900">
+                <h2 className="text-base font-semibold text-[#1F2421]">
                   自動化缺曠課判別演算法引擎
                 </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
+                <p className="text-xs text-[#7C7A72] mt-0.5">
                   即時整合巡堂點名紀錄、全校課表時間軸與學務處核准假單，自動完成四階段判別與風險分級
                 </p>
               </div>
-              <div className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-lg self-start">
+              <div className="inline-flex items-center gap-1 p-1 bg-[#F2EFE9] rounded-xl self-start">
                 {(
                   [
                     ['all', '全部風險'],
@@ -245,8 +250,8 @@ export const TimetableTruancyView: React.FC<TimetableTruancyViewProps> = ({
                     key={k}
                     type="button"
                     onClick={() => setRiskFilter(k)}
-                    className={`min-h-[32px] px-2.5 py-1 text-xs font-medium rounded-md whitespace-nowrap cursor-pointer ${
-                      riskFilter === k ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
+                    className={`min-h-[32px] px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap cursor-pointer transition-colors ${
+                      riskFilter === k ? 'bg-[#1E5C4B] text-white shadow-xs' : 'text-[#5C615C] hover:text-[#1F2421]'
                     }`}
                   >
                     {label}
@@ -353,7 +358,7 @@ export const TimetableTruancyView: React.FC<TimetableTruancyViewProps> = ({
                             <button
                               type="button"
                               onClick={() => handleEscalateStudent(s)}
-                              className="min-h-[34px] px-3 py-1 text-xs font-medium text-teal-700 hover:bg-teal-50 border border-teal-200 rounded-lg cursor-pointer"
+                              className="min-h-[34px] px-3 py-1 text-xs font-semibold text-[#1E5C4B] hover:bg-[#E5F2EE] border border-[#C6DFD7] rounded-lg cursor-pointer"
                             >
                               轉發通報
                             </button>
@@ -464,12 +469,12 @@ export const TimetableTruancyView: React.FC<TimetableTruancyViewProps> = ({
 
       {/* SUB-TAB 2: School Timetable Database */}
       {subTab === 'timetable' && (
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-          <div className="p-4 sm:p-5 border-b border-slate-200 space-y-4">
+        <div className="bg-white border border-[#E5E1D8] rounded-xl overflow-hidden">
+          <div className="p-4 sm:p-5 border-b border-[#E5E1D8] space-y-4">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
               <div>
-                <h2 className="text-base font-semibold text-slate-900">學校課表資料庫整合管理</h2>
-                <p className="text-xs text-slate-500 mt-0.5">
+                <h2 className="text-base font-semibold text-[#1F2421]">學校課表資料庫整合管理</h2>
+                <p className="text-xs text-[#7C7A72] mt-0.5">
                   支援 CSV 批次匯入現有校務課表、手動維護教室移地資訊與班級點名名單
                 </p>
               </div>
@@ -487,7 +492,7 @@ export const TimetableTruancyView: React.FC<TimetableTruancyViewProps> = ({
                       type="button"
                       onClick={() => csvInputRef.current?.click()}
                       disabled={importingCsv}
-                      className="min-h-[40px] px-3.5 py-2 bg-teal-700 hover:bg-teal-800 text-white text-xs font-medium rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                      className="min-h-[40px] px-3.5 py-2 bg-[#1E5C4B] hover:bg-[#16473A] text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
                     >
                       <FileUp className="w-4 h-4" />
                       {importingCsv ? '匯入解析中...' : '上傳學校 CSV 課表'}
@@ -495,7 +500,7 @@ export const TimetableTruancyView: React.FC<TimetableTruancyViewProps> = ({
                     <button
                       type="button"
                       onClick={downloadTimetableCsvTemplate}
-                      className="min-h-[40px] px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-medium rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                      className="min-h-[40px] px-3.5 py-2 bg-white hover:bg-[#FAF9F5] text-[#3A3F3B] border border-[#DDD8CD] text-xs font-medium rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
                     >
                       <Download className="w-4 h-4" />
                       下載匯入範本
@@ -506,7 +511,7 @@ export const TimetableTruancyView: React.FC<TimetableTruancyViewProps> = ({
                   <button
                     type="button"
                     onClick={() => exportTimetableBackupCsv(timetables)}
-                    className="min-h-[40px] px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-medium rounded-lg whitespace-nowrap cursor-pointer"
+                    className="min-h-[40px] px-3.5 py-2 bg-white hover:bg-[#FAF9F5] text-[#3A3F3B] border border-[#DDD8CD] text-xs font-medium rounded-lg whitespace-nowrap cursor-pointer"
                   >
                     備份課表 CSV
                   </button>
@@ -515,7 +520,7 @@ export const TimetableTruancyView: React.FC<TimetableTruancyViewProps> = ({
                   <button
                     type="button"
                     onClick={() => setShowAddSlotModal(true)}
-                    className="min-h-[40px] px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                    className="min-h-[40px] px-3.5 py-2 bg-[#1F2421] hover:bg-[#313834] text-white text-xs font-medium rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
                     新增單節課表
@@ -526,26 +531,26 @@ export const TimetableTruancyView: React.FC<TimetableTruancyViewProps> = ({
                     type="button"
                     onClick={onSeedDemoData}
                     disabled={seeding}
-                    className="min-h-[40px] px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-medium rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                    className="min-h-[40px] px-3.5 py-2 bg-[#1E5C4B] hover:bg-[#16473A] text-white text-xs font-medium rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
                   >
                     <Database className="w-4 h-4" />
                     {seeding ? '建立中...' : '載入範例課表'}
                   </button>
                 )}
                 {!isAdmin && (
-                  <span className="text-xs text-slate-500">課表匯入與刪除限管理者操作</span>
+                  <span className="text-xs text-[#7C7A72]">課表匯入與刪除限管理者操作</span>
                 )}
               </div>
             </div>
 
-            <div className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-lg overflow-x-auto">
+            <div className="inline-flex items-center gap-1 p-1 bg-[#F2EFE9] rounded-xl overflow-x-auto">
               {[0, 1, 2, 3, 4, 5].map((d) => (
                 <button
                   key={d}
                   type="button"
                   onClick={() => setDayFilter(d)}
-                  className={`min-h-[34px] px-3 py-1 text-xs font-medium rounded-md whitespace-nowrap cursor-pointer ${
-                    dayFilter === d ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
+                  className={`min-h-[34px] px-3 py-1 text-xs font-semibold rounded-lg whitespace-nowrap cursor-pointer transition-colors ${
+                    dayFilter === d ? 'bg-[#1E5C4B] text-white shadow-xs' : 'text-[#5C615C] hover:text-[#1F2421]'
                   }`}
                 >
                   {d === 0 ? '全部星期' : DAY_OF_WEEK_LABELS[d]}
@@ -629,18 +634,18 @@ export const TimetableTruancyView: React.FC<TimetableTruancyViewProps> = ({
 
       {/* SUB-TAB 3: Approved Leave Records */}
       {subTab === 'leaves' && (
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-          <div className="p-4 sm:p-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="bg-white border border-[#E5E1D8] rounded-xl overflow-hidden">
+          <div className="p-4 sm:p-5 border-b border-[#E5E1D8] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <h2 className="text-base font-semibold text-slate-900">核准假單資料庫（自動核銷比對來源）</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <h2 className="text-base font-semibold text-[#1F2421]">核准假單資料庫（自動核銷比對來源）</h2>
+              <p className="text-xs text-[#7C7A72] mt-0.5">
                 登錄學生核准假單後，自動缺曠判別演算法將即時核銷對應節次之缺席紀錄，不再誤判曠課
               </p>
             </div>
             <button
               type="button"
               onClick={() => setShowAddLeaveModal(true)}
-              className="min-h-[40px] px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white text-xs font-medium rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+              className="min-h-[40px] px-4 py-2 bg-[#1E5C4B] hover:bg-[#16473A] text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               登錄核准假單
@@ -869,7 +874,7 @@ const AddTimetableModal: React.FC<{
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="min-h-[42px] px-4 text-slate-600 cursor-pointer">取消</button>
-            <button type="submit" disabled={saving} className="min-h-[42px] px-5 bg-teal-700 hover:bg-teal-800 text-white font-semibold rounded-lg cursor-pointer">
+            <button type="submit" disabled={saving} className="min-h-[42px] px-5 bg-[#1E5C4B] hover:bg-[#16473A] text-white font-semibold rounded-xl cursor-pointer">
               {saving ? '儲存中...' : '確認新增'}
             </button>
           </div>
@@ -975,8 +980,8 @@ const AddLeaveModal: React.FC<{
                   onClick={() => togglePeriod(p)}
                   className={`min-h-[38px] px-3 py-1 rounded-lg text-xs font-mono-num font-medium border cursor-pointer ${
                     periods.includes(p)
-                      ? 'bg-teal-700 text-white border-teal-700'
-                      : 'bg-white text-slate-600 border-slate-200'
+                      ? 'bg-[#1E5C4B] text-white border-[#1E5C4B]'
+                      : 'bg-white text-[#5C615C] border-[#E5E1D8]'
                   }`}
                 >
                   第{p}節
@@ -995,8 +1000,8 @@ const AddLeaveModal: React.FC<{
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onClose} className="min-h-[42px] px-4 text-slate-600 cursor-pointer">取消</button>
-            <button type="submit" disabled={saving} className="min-h-[42px] px-5 bg-teal-700 hover:bg-teal-800 text-white font-semibold rounded-lg cursor-pointer">
+            <button type="button" onClick={onClose} className="min-h-[42px] px-4 text-[#5C615C] cursor-pointer">取消</button>
+            <button type="submit" disabled={saving} className="min-h-[42px] px-5 bg-[#1E5C4B] hover:bg-[#16473A] text-white font-semibold rounded-xl cursor-pointer">
               {saving ? '儲存中...' : '儲存並自動核銷'}
             </button>
           </div>

@@ -26,8 +26,8 @@ export default defineConfig(() => {
           short_name: '巡堂通',
           description:
             '跨裝置校園即時巡堂管理系統，整合學校課表、自動缺曠判別、異常事件推播與 PDF／Excel 報表匯出。',
-          theme_color: '#0f766e',
-          background_color: '#f8fafc',
+          theme_color: '#1E5C4B',
+          background_color: '#F6F4EE',
           display: 'standalone',
           orientation: 'any',
           lang: 'zh-Hant',
