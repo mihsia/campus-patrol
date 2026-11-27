@@ -60,6 +60,7 @@ import { IncidentsView } from './components/IncidentsView';
 import { TimetableTruancyView } from './components/TimetableTruancyView';
 import { ReportsView } from './components/ReportsView';
 import { StaffView } from './components/StaffView';
+import { OfflineBanner, PWAInstallButton } from './components/PWAInstallButton';
 
 interface NavItemConfig {
   id: NavSection;
@@ -567,6 +568,7 @@ function CampusPatrolApp() {
               {profile.department} · {profile.jobTitle}
             </p>
           </div>
+          <PWAInstallButton variant="sidebar" />
           <button
             type="button"
             onClick={handleSignOut}
@@ -581,7 +583,7 @@ function CampusPatrolApp() {
       {/* Main Content Area */}
       <div className="flex-1 lg:pl-[252px] flex flex-col min-w-0">
         {/* Compact Top Header (52px on mobile to honor <=15% sticky cap; 64px on desktop) */}
-        <header className="no-print sticky top-0 z-20 h-[52px] lg:h-16 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between gap-4">
+        <header className="no-print sticky top-0 z-20 pt-safe min-h-[52px] lg:h-16 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
             <span className="lg:hidden text-sm font-bold text-teal-800 whitespace-nowrap shrink-0">
               巡堂通
@@ -592,21 +594,25 @@ function CampusPatrolApp() {
             </h1>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="lg:hidden">
+              <PWAInstallButton variant="compact" />
+            </div>
             {openHighIncidentCount > 0 && activeNav !== 'incidents' && (
               <button
                 type="button"
                 onClick={() => setActiveNav('incidents')}
-                className="min-h-[36px] px-3 py-1.5 text-xs font-semibold text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                className="min-h-[36px] px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
               >
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                <span>緊急異常 {openHighIncidentCount}</span>
+                <span className="hidden sm:inline">緊急異常</span>
+                <span className="font-mono-num">{openHighIncidentCount}</span>
               </button>
             )}
             <button
               type="button"
               onClick={() => setActiveNav('patrol')}
-              className="min-h-[38px] px-3.5 py-1.5 bg-teal-700 hover:bg-teal-800 text-white text-xs sm:text-sm font-medium rounded-lg whitespace-nowrap shrink-0 cursor-pointer"
+              className="min-h-[38px] px-3 sm:px-3.5 py-1.5 bg-teal-700 hover:bg-teal-800 text-white text-xs sm:text-sm font-medium rounded-lg whitespace-nowrap shrink-0 cursor-pointer"
             >
               開始巡堂
             </button>
@@ -758,11 +764,14 @@ function CampusPatrolApp() {
               isAdmin={isAdmin}
               allowedAccounts={allowedAccounts}
               staffList={staffList}
+              onSignOut={handleSignOut}
               onActionFeedback={showFeedback}
             />
           )}
         </main>
       </div>
+
+      <OfflineBanner />
 
       {/* Mobile Fixed Bottom Tab Bar (56px height + 52px top bar = 108px < 15% of 812px viewport) */}
       <nav

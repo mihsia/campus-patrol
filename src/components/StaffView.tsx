@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   CheckCircle2,
   Edit3,
+  LogOut,
   Power,
   Search,
   Shield,
@@ -35,6 +36,7 @@ interface StaffViewProps {
   isAdmin: boolean;
   allowedAccounts: AllowedAccount[];
   staffList: StaffProfile[];
+  onSignOut: () => Promise<void>;
   onActionFeedback: (message: string) => void;
 }
 
@@ -46,6 +48,7 @@ export const StaffView: React.FC<StaffViewProps> = ({
   isAdmin,
   allowedAccounts,
   staffList,
+  onSignOut,
   onActionFeedback,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -241,6 +244,15 @@ export const StaffView: React.FC<StaffViewProps> = ({
               <CheckCircle2 className="w-4 h-4" />
               {savingProfile ? '儲存中...' : '儲存個人顯示資料'}
             </button>
+
+            <button
+              type="button"
+              onClick={onSignOut}
+              className="lg:hidden w-full min-h-[44px] px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-sm font-medium rounded-lg inline-flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <LogOut className="w-4 h-4" />
+              登出目前 Google 帳號
+            </button>
           </form>
         </div>
 
@@ -331,10 +343,18 @@ export const StaffView: React.FC<StaffViewProps> = ({
           <button
             type="button"
             onClick={() => setShowProfilePanel((prev) => !prev)}
-            className="min-h-[42px] px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs sm:text-sm font-medium rounded-lg inline-flex items-center gap-2 whitespace-nowrap cursor-pointer"
+            className="min-h-[42px] px-3.5 sm:px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs sm:text-sm font-medium rounded-lg inline-flex items-center gap-2 whitespace-nowrap cursor-pointer"
           >
             <UserCog className="w-4 h-4" />
-            個人顯示設定
+            個人設定
+          </button>
+          <button
+            type="button"
+            onClick={onSignOut}
+            className="lg:hidden min-h-[42px] px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-medium rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
+            登出
           </button>
           <button
             type="button"
@@ -471,7 +491,101 @@ export const StaffView: React.FC<StaffViewProps> = ({
               </div>
 
               <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-                <div className="overflow-x-auto">
+                {/* Mobile Touch Card View (< md) */}
+                <div className="md:hidden divide-y divide-slate-100">
+                  {group.accounts.map((acc) => {
+                    const isBootstrap =
+                      acc.email.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
+                    const isSelf = acc.email.toLowerCase() === userEmail.toLowerCase();
+                    const isBusy = busyId === acc.id;
+
+                    return (
+                      <div
+                        key={acc.id}
+                        className={`p-4 space-y-3 ${
+                          acc.status === 'disabled' ? 'bg-slate-50/70' : ''
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-slate-900 flex items-center gap-1.5 flex-wrap">
+                              <span>{acc.displayName}</span>
+                              {isSelf && (
+                                <span className="text-xs font-normal text-teal-700">（目前登入）</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-500 mt-0.5">{acc.jobTitle}</p>
+                          </div>
+                          <div className="text-right shrink-0 text-xs space-y-0.5">
+                            <p
+                              className={`font-semibold ${
+                                acc.role === 'admin' ? 'text-teal-800' : 'text-slate-700'
+                              }`}
+                            >
+                              {STAFF_ROLE_LABELS[acc.role]}
+                            </p>
+                            <p
+                              className={`font-semibold ${
+                                acc.status === 'active' ? 'text-emerald-700' : 'text-red-700'
+                              }`}
+                            >
+                              {ACCOUNT_STATUS_LABELS[acc.status]}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="text-xs font-mono-num text-slate-700 break-all">
+                          {acc.email}
+                        </div>
+
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => setEditingAccount(acc)}
+                            className="flex-1 min-h-[44px] px-3 py-2 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            編輯
+                          </button>
+                          {isBootstrap ? (
+                            <span className="text-xs text-slate-400 px-2">主管理者</span>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                disabled={isBusy || isSelf}
+                                onClick={() => handleToggleStatus(acc)}
+                                className={`flex-1 min-h-[44px] px-3 py-2 text-xs font-medium rounded-lg border inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40 ${
+                                  acc.status === 'active'
+                                    ? 'text-slate-700 bg-slate-50 border-slate-200'
+                                    : 'text-emerald-800 bg-emerald-50 border-emerald-200'
+                                }`}
+                              >
+                                <Power className="w-3.5 h-3.5" />
+                                {acc.status === 'active' ? '停用' : '啟用'}
+                              </button>
+                              {!isSelf && (
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() => setConfirmDeleteAccount(acc)}
+                                  aria-label={`刪除 ${acc.displayName}`}
+                                  className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center text-slate-400 hover:text-red-700 border border-slate-200 rounded-lg cursor-pointer"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Desktop & Tablet Table View (>= md) */}
+                <div className="hidden md:block overflow-x-auto">
                   <table className="w-full text-left border-collapse text-sm">
                     <thead>
                       <tr className="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold text-slate-500">

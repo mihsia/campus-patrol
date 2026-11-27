@@ -11,6 +11,7 @@
     background-color: #f8fafc;
     color: #0f172a;
     -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
   }
 
   .tabular-nums {
@@ -23,7 +24,11 @@
   }
 }
 
-/* Safe area bottom padding for mobile touch devices */
+/* Safe area padding for iOS/Android notch and home indicator in standalone PWA mode */
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }

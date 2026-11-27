@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   Smartphone,
 } from 'lucide-react';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface SignInScreenProps {
   onSignIn: () => Promise<void>;
@@ -95,6 +96,8 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({
               <ShieldCheck className="w-5 h-5 shrink-0" />
               <span>{signingIn ? '正在驗證 Google 帳號...' : '使用 Google 帳號登入系統'}</span>
             </button>
+
+            <PWAInstallButton variant="banner" />
 
             {errorMessage && (
               <div className="p-3.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 leading-relaxed break-all">
