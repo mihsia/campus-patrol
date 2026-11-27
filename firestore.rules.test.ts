@@ -126,3 +126,97 @@ export const DIRTY_DOZEN_TESTS: AdversarialTestCase[] = [
     expected: 'PERMISSION_DENIED',
   },
 ];
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { BOOTSTRAP_ADMIN_EMAIL } from './src/types/patrol';
+import { emailToAccountId } from './src/lib/validation';
+
+const rulesSource = fs.readFileSync(path.resolve(import.meta.dirname, 'firestore.rules'), 'utf8');
+
+function extractMatchBlock(collectionPath: string): string {
+  const marker = `match ${collectionPath} {`;
+  const start = rulesSource.indexOf(marker);
+  assert.ok(start !== -1, `Expected block "${marker}" in firestore.rules`);
+  const braceStart = start + marker.length - 1;
+  let depth = 0;
+  for (let i = braceStart; i < rulesSource.length; i++) {
+    if (rulesSource[i] === '{') depth++;
+    else if (rulesSource[i] === '}') {
+      depth--;
+      if (depth === 0) return rulesSource.slice(start, i + 1);
+    }
+  }
+  throw new Error(`Unclosed block "${marker}" in firestore.rules`);
+}
+
+describe('Firestore Security Rules — Dirty Dozen invariants', () => {
+  it('defines all 12 Dirty Dozen adversarial cases expecting PERMISSION_DENIED', () => {
+    assert.equal(DIRTY_DOZEN_TESTS.length, 12);
+    for (const tc of DIRTY_DOZEN_TESTS) {
+      assert.equal(tc.expected, 'PERMISSION_DENIED');
+    }
+  });
+
+  it('enforces Pillar 0 default-deny safety net and verified Google-only login (#1)', () => {
+    assert.match(rulesSource, /match \/\{document=\*\*\}\s*\{\s*allow read, write: if false;\s*\}/);
+    assert.ok(rulesSource.includes("request.auth.token.email_verified == true"));
+    assert.ok(rulesSource.includes("request.auth.token.firebase.sign_in_provider == 'google.com'"));
+  });
+
+  it('enforces active allowlist check and instant disabled revocation (#2, #3)', () => {
+    assert.ok(rulesSource.includes("get(/databases/$(database)/documents/allowedAccounts/$(userEmailKey())).data.status == 'active'"));
+    assert.ok(rulesSource.includes("get(/databases/$(database)/documents/allowedAccounts/$(userEmailKey())).data.email == userEmailLower()"));
+  });
+
+  it('blocks self role escalation, self re-enable, and non-admin PII directory listing (#4, #5, #6)', () => {
+    const allowedBlock = extractMatchBlock('/allowedAccounts/{accountId}');
+    assert.ok(allowedBlock.includes("allow list: if isVerifiedGoogleUser() && resource.data.campusId == 'main-campus' && isAdmin();"));
+    assert.ok(allowedBlock.includes("existing().status == 'active'"));
+    assert.ok(allowedBlock.includes('incoming().role == existing().role'));
+    assert.ok(allowedBlock.includes('incoming().status == existing().status'));
+
+    const privateBlock = extractMatchBlock('/userPrivate/{userId}');
+    assert.ok(privateBlock.includes('allow list: if false;'));
+  });
+
+  it('rejects shadow ghost fields via strict hasOnly key allowlists and path ID consistency (#7, #10)', () => {
+    assert.ok(rulesSource.includes('function isValidAllowedAccount(data, accountId)'));
+    assert.ok(rulesSource.includes('data.keys().hasOnly(['));
+    assert.ok(rulesSource.includes("accountId == data.email.replace('[^a-z0-9]', '_')"));
+    assert.equal(emailToAccountId(BOOTSTRAP_ADMIN_EMAIL), 'mihsia_gmail_com');
+  });
+
+  it('restricts school timetables creation/update/delete to admins only (#8)', () => {
+    const ttBlock = extractMatchBlock('/timetables/{timetableId}');
+    assert.match(ttBlock, /allow create:[\s\S]*isAdmin\(\);/);
+    assert.match(ttBlock, /allow update:[\s\S]*isAdmin\(\)/);
+    assert.match(ttBlock, /allow delete:[\s\S]*isAdmin\(\);/);
+  });
+
+  it('protects bootstrap admin from demotion, disabling, or deletion (#9)', () => {
+    const allowedBlock = extractMatchBlock('/allowedAccounts/{accountId}');
+    assert.ok(
+      allowedBlock.includes(
+        `(existing().email != '${BOOTSTRAP_ADMIN_EMAIL}' || (incoming().role == 'admin' && incoming().status == 'active'))`
+      )
+    );
+    assert.ok(
+      allowedBlock.includes(
+        `allow delete: if isValidId(accountId) && isVerifiedGoogleUser() && existing().email != '${BOOTSTRAP_ADMIN_EMAIL}' && isAdmin();`
+      )
+    );
+  });
+
+  it('prevents orphaned patrolLogs and locks resolved incidents for non-admins (#11, #12)', () => {
+    const patrolBlock = extractMatchBlock('/patrolLogs/{logId}');
+    assert.ok(patrolBlock.includes('exists(/databases/$(database)/documents/timetables/$(incoming().timetableId))'));
+
+    const incBlock = extractMatchBlock('/incidents/{incidentId}');
+    assert.ok(incBlock.includes("existing().status in ['open', 'in_progress']"));
+    assert.ok(incBlock.includes('isAdmin() &&'));
+  });
+});
+
