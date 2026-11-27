@@ -303,6 +303,8 @@ export const TimetableImportModal: React.FC<TimetableImportModalProps> = ({
     try {
       const importedCount = await batchImportTimetableSlots(uid, importRows, {
         replaceSlotIds: existingIdsToReplace,
+        academicYear: schoolSettings.academicYear,
+        semester: schoolSettings.semester,
       });
       onImported({
         importedCount,

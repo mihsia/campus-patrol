@@ -281,6 +281,16 @@
           "type": "array",
           "description": "Bounded student list (max 60 entries, e.g., '01 王小明')"
         },
+        "academicYear": {
+          "type": "string",
+          "maxLength": 10,
+          "description": "Optional ROC academic year tag (e.g., '115')"
+        },
+        "semester": {
+          "type": "string",
+          "enum": ["第一學期", "第二學期"],
+          "description": "Optional semester tag"
+        },
         "createdBy": {
           "type": "string",
           "minLength": 1,
@@ -729,6 +739,163 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "TimetableArchive": {
+      "title": "TimetableArchive",
+      "description": "Historical academic year/semester timetable archive snapshot metadata.",
+      "type": "object",
+      "properties": {
+        "campusId": {
+          "type": "string",
+          "enum": ["main-campus"]
+        },
+        "academicYear": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 10
+        },
+        "semester": {
+          "type": "string",
+          "enum": ["第一學期", "第二學期"]
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "classCount": {
+          "type": "integer"
+        },
+        "slotCount": {
+          "type": "integer"
+        },
+        "classNames": {
+          "type": "array",
+          "description": "Bounded list of archived class names (max 60 entries)"
+        },
+        "archivedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "archivedByName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "archivedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "campusId",
+        "academicYear",
+        "semester",
+        "label",
+        "note",
+        "classCount",
+        "slotCount",
+        "classNames",
+        "archivedBy",
+        "archivedByName",
+        "archivedAt"
+      ]
+    },
+    "ArchivedTimetableSlot": {
+      "title": "ArchivedTimetableSlot",
+      "description": "Immutable historical timetable slot stored inside a TimetableArchive subcollection.",
+      "type": "object",
+      "properties": {
+        "campusId": {
+          "type": "string",
+          "enum": ["main-campus"]
+        },
+        "archiveId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "dayOfWeek": {
+          "type": "integer"
+        },
+        "period": {
+          "type": "integer"
+        },
+        "building": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "floor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "roomNumber": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "className": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 30
+        },
+        "grade": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50
+        },
+        "teacherName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "isRelocated": {
+          "type": "boolean"
+        },
+        "locationNote": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "archivedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "archivedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "campusId",
+        "archiveId",
+        "dayOfWeek",
+        "period",
+        "building",
+        "floor",
+        "roomNumber",
+        "className",
+        "grade",
+        "subject",
+        "teacherName",
+        "isRelocated",
+        "locationNote",
+        "archivedBy",
+        "archivedAt"
+      ]
     }
   },
   "firestore": {
@@ -754,11 +921,19 @@
     },
     "/timetables/{timetableId}": {
       "schema": { "$ref": "#/entities/TimetableSlot" },
-      "description": "School timetable slots integrated with patrol and truancy analysis."
+      "description": "Active academic year school timetable slots integrated with patrol analysis."
+    },
+    "/timetableArchives/{archiveId}": {
+      "schema": { "$ref": "#/entities/TimetableArchive" },
+      "description": "Historical academic year/semester timetable archive metadata."
+    },
+    "/timetableArchives/{archiveId}/slots/{slotId}": {
+      "schema": { "$ref": "#/entities/ArchivedTimetableSlot" },
+      "description": "Immutable historical timetable slots archived for past academic years/semesters."
     },
     "/leaveRecords/{leaveId}": {
       "schema": { "$ref": "#/entities/LeaveRecord" },
-      "description": "Approved student leave records for automated truancy cross-checking."
+      "description": "Approved student leave records (legacy)."
     },
     "/patrolLogs/{logId}": {
       "schema": { "$ref": "#/entities/PatrolLog" },
@@ -766,7 +941,7 @@
     },
     "/absences/{absenceId}": {
       "schema": { "$ref": "#/entities/AbsenceRecord" },
-      "description": "Student absence and automated truancy evaluation records."
+      "description": "Student absence records (legacy)."
     },
     "/incidents/{incidentId}": {
       "schema": { "$ref": "#/entities/IncidentReport" },

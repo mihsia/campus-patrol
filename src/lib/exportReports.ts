@@ -902,7 +902,25 @@ function splitCsvLine(line: string): string[] {
   return result;
 }
 
-export function exportTimetableBackupCsv(timetables: TimetableSlot[]): void {
+export function exportTimetableBackupCsv(
+  timetables: Array<
+    Pick<
+      TimetableSlot,
+      | 'dayOfWeek'
+      | 'period'
+      | 'building'
+      | 'floor'
+      | 'roomNumber'
+      | 'className'
+      | 'grade'
+      | 'subject'
+      | 'teacherName'
+      | 'isRelocated'
+      | 'locationNote'
+    >
+  >,
+  fileName = '班級課表資料庫備份.csv'
+): void {
   const headers = [
     '星期(1-5)',
     '節次(1-8)',
@@ -929,5 +947,5 @@ export function exportTimetableBackupCsv(timetables: TimetableSlot[]): void {
     t.isRelocated ? '是' : '否',
     t.locationNote,
   ]);
-  exportCsvWithBom('班級課表資料庫備份.csv', headers, rows);
+  exportCsvWithBom(fileName, headers, rows);
 }

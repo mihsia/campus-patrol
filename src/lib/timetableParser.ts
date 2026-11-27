@@ -313,6 +313,21 @@ function isLikelyPersonName(text: string): boolean {
     '彈性課程',
     '生活課程',
     '健康與體育',
+    '禮儀',
+    '國際',
+    '本土',
+    '閩南',
+    '人文',
+    '科學',
+    '時間',
+    '活動',
+    '母語',
+    '書法',
+    '鄉土',
+    '社團',
+    '輔導',
+    '班會',
+    '週會',
   ];
   if (nonNames.some((w) => s === w || s.includes('課程') || s.includes('時間') || s.includes('活動'))) {
     return false;
@@ -329,12 +344,16 @@ function normalizeTeacherCell(raw: string): string {
   return s;
 }
 
-function normalizeSubjectRaw(lines: string[], rawText: string): {
+function normalizeSubjectRaw(
+  lines: string[],
+  rawText: string,
+  hasExternalTeacherTable = false
+): {
   cleanSubject: string;
   inlineTeacher: string;
 } {
   const cleanLines = lines.map((l) => stripAllSpaces(l)).filter(Boolean);
-  if (cleanLines.length >= 2) {
+  if (!hasExternalTeacherTable && cleanLines.length >= 2) {
     const lastLine = cleanLines[cleanLines.length - 1];
     const prevText = cleanLines.slice(0, -1).join('');
     if (isLikelyPersonName(lastLine) && prevText.length >= 2) {
@@ -697,8 +716,13 @@ function parseMatrixGridToClassTimetable(params: {
 
       if (dayCells.length === 0) continue;
 
+      const hasExternalTeachers = teacherMappings.length > 0 || Boolean(homeroomTeacher);
       const resolvedParts = dayCells.map((cell) => {
-        const { cleanSubject, inlineTeacher } = normalizeSubjectRaw(cell.lines, cell.text);
+        const { cleanSubject, inlineTeacher } = normalizeSubjectRaw(
+          cell.lines,
+          cell.text,
+          hasExternalTeachers
+        );
         const resolved = resolveSingleSubjectAndTeacher(
           cleanSubject,
           inlineTeacher,
@@ -1680,15 +1704,68 @@ function parsePdfPageBoxes(
   }
 
   // 6b. Locate 節數 & 任課教師 column X positions in the right-side panel
-  const rightTopLines = rightBoxes.filter((b) => b.cy >= headerY - 95);
-  const hoursHeaderBox = rightTopLines.find((b) => /節數/.test(stripAllSpaces(b.str)));
-  const teacherHeaderBox = rightTopLines.find((b) => /任課教師|教師|老師/.test(stripAllSpaces(b.str)));
+  // Strictly avoid matching the merged top banner "每週各科授課教師及節數"
+  const rightTopLines = rightBoxes.filter((b) => b.cy >= headerY - 120);
+  const isBannerText = (s: string) => /每週|各科|及|總/.test(s);
+
+  let hoursHeaderBox: { x0: number; x1: number; cx: number; cy: number } | null =
+    rightTopLines.find((b) => {
+      const s = stripAllSpaces(b.str);
+      return /^節數$/.test(s) && !isBannerText(s);
+    }) ?? null;
+
+  // Handle PDFs where "節" and "數" are rendered as separate glyphs on the same Y line
+  if (!hoursHeaderBox) {
+    const jieBoxes = rightTopLines.filter((b) => stripAllSpaces(b.str) === '節');
+    const shuBoxes = rightTopLines.filter((b) => stripAllSpaces(b.str) === '數');
+    for (const jb of jieBoxes) {
+      const pair = shuBoxes.find(
+        (sb) => Math.abs(sb.cy - jb.cy) <= 6 && sb.cx > jb.cx && sb.cx - jb.cx <= 26
+      );
+      if (pair) {
+        hoursHeaderBox = {
+          x0: Math.min(jb.x0, pair.x0),
+          x1: Math.max(jb.x1, pair.x1),
+          cx: (Math.min(jb.x0, pair.x0) + Math.max(jb.x1, pair.x1)) / 2,
+          cy: (jb.cy + pair.cy) / 2,
+        };
+        break;
+      }
+    }
+  }
+
+  let teacherHeaderBox: { x0: number; x1: number; cx: number; cy: number } | null =
+    rightTopLines.find((b) => {
+      const s = stripAllSpaces(b.str);
+      return /^(任課教師|授課教師|教師|老師)$/.test(s) && !isBannerText(s);
+    }) ?? null;
+
+  if (!teacherHeaderBox && hoursHeaderBox) {
+    const sameRowTeacherBoxes = rightTopLines.filter(
+      (b) =>
+        b.cx > hoursHeaderBox!.x1 + 2 &&
+        Math.abs(b.cy - hoursHeaderBox!.cy) <= 10 &&
+        /^[任課授教師老]+$/.test(stripAllSpaces(b.str))
+    );
+    if (sameRowTeacherBoxes.length > 0) {
+      const x0 = Math.min(...sameRowTeacherBoxes.map((b) => b.x0));
+      const x1 = Math.max(...sameRowTeacherBoxes.map((b) => b.x1));
+      teacherHeaderBox = {
+        x0,
+        x1,
+        cx: (x0 + x1) / 2,
+        cy: hoursHeaderBox.cy,
+      };
+    }
+  }
 
   if (hoursHeaderBox) {
     const xHours = hoursHeaderBox.cx;
-    const xTeacherMid = teacherHeaderBox ? teacherHeaderBox.cx : xHours + 45;
-    const hoursLeftBound = hoursHeaderBox.x0 - 8;
-    const hoursRightBound = Math.min(hoursHeaderBox.x1 + 8, (xHours + xTeacherMid) / 2);
+    const xTeacherMid = teacherHeaderBox ? teacherHeaderBox.cx : xHours + 48;
+    const hoursLeftBound = hoursHeaderBox.x0 - 10;
+    const hoursRightBound = teacherHeaderBox
+      ? Math.max(hoursHeaderBox.x1 + 6, Math.min(teacherHeaderBox.x0 - 2, (xHours + xTeacherMid) / 2))
+      : hoursHeaderBox.x1 + 12;
 
     // Find 總節數 row Y so we exclude summary and 級任老師 rows below it
     const totalRowBox = rightBoxes.find((b) => /總節數|合計/.test(stripAllSpaces(b.str)));
@@ -1701,10 +1778,9 @@ function parsePdfPageBoxes(
     const hoursRows = rightBoxes
       .filter(
         (b) =>
-          b.cy < hoursHeaderBox.cy - 6 &&
+          b.cy < hoursHeaderBox!.cy - 6 &&
           b.cy > mappingFloorY &&
-          b.cx >= hoursLeftBound &&
-          b.cx <= hoursRightBound &&
+          ((b.cx >= hoursLeftBound && b.cx <= hoursRightBound) || Math.abs(b.cx - xHours) <= 20) &&
           /^\d{1,2}(\.\d+)?$/.test(stripAllSpaces(b.str))
       )
       .sort((a, b) => b.cy - a.cy);
@@ -1715,18 +1791,18 @@ function parsePdfPageBoxes(
       const prevHr = hoursRows[i - 1];
       const nextHr = hoursRows[i + 1];
 
-      const rowHigh = prevHr ? (prevHr.cy + hr.cy) / 2 : Math.min(hoursHeaderBox.cy - 4, hr.cy + 20);
-      const rowLow = nextHr ? (hr.cy + nextHr.cy) / 2 : Math.max(mappingFloorY, hr.cy - 20);
+      const rowHigh = prevHr ? (prevHr.cy + hr.cy) / 2 : Math.min(hoursHeaderBox.cy - 4, hr.cy + 22);
+      const rowLow = nextHr ? (hr.cy + nextHr.cy) / 2 : Math.max(mappingFloorY, hr.cy - 22);
 
       // Teacher name to the right of hours column
       const tBoxes = rightBoxes.filter(
-        (b) => b.cx > hoursRightBound && b.cy >= rowLow && b.cy <= rowHigh
+        (b) => b.cx > hoursRightBound - 2 && b.cy >= rowLow && b.cy <= rowHigh
       );
       const teacherName = normalizeTeacherCell(joinPdfBoxesAsLines(tBoxes).join(''));
 
       // Subject name to the left of hours column (if both 領域 and 科目 exist, pick rightmost X-cluster!)
       const sBoxes = rightBoxes.filter(
-        (b) => b.cx >= friRight - 2 && b.cx < hoursLeftBound && b.cy >= rowLow && b.cy <= rowHigh
+        (b) => b.cx >= friRight - 2 && b.cx < hoursLeftBound + 2 && b.cy >= rowLow && b.cy <= rowHigh
       );
       const xClusters = clusterBoxesByX(sBoxes, 8);
       const subjectCluster = xClusters[xClusters.length - 1] || [];
@@ -1792,6 +1868,7 @@ function parsePdfPageBoxes(
         matchStatus: ParsedPeriodSlot['matchStatus'];
       }> = [];
 
+      const hasExternalTeachers = teacherMappings.length > 0 || Boolean(homeroomTeacher);
       for (const group of subCellGroups) {
         const lines = joinPdfBoxesAsLines(group);
         const rawJoined = lines.join('\n');
@@ -1799,7 +1876,11 @@ function parsePdfPageBoxes(
         if (!cleanJoined || NON_INSTRUCTIONAL_KEYWORDS.some((kw) => cleanJoined.includes(kw))) {
           continue;
         }
-        const { cleanSubject, inlineTeacher } = normalizeSubjectRaw(lines, rawJoined);
+        const { cleanSubject, inlineTeacher } = normalizeSubjectRaw(
+          lines,
+          rawJoined,
+          hasExternalTeachers
+        );
         if (!cleanSubject) continue;
         const resolved = resolveSingleSubjectAndTeacher(
           cleanSubject,

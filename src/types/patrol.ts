@@ -99,9 +99,45 @@ export interface TimetableSlot {
   isRelocated: boolean;
   locationNote: string;
   roster: string[];
+  academicYear?: string;
+  semester?: SemesterType;
   createdBy: string;
   createdAt?: Timestamp | null;
   updatedAt?: Timestamp | null;
+}
+
+export interface TimetableArchive {
+  id: string;
+  campusId: typeof CAMPUS_ID;
+  academicYear: string;
+  semester: SemesterType;
+  label: string;
+  note: string;
+  classCount: number;
+  slotCount: number;
+  classNames: string[];
+  archivedBy: string;
+  archivedByName: string;
+  archivedAt?: Timestamp | null;
+}
+
+export interface ArchivedTimetableSlot {
+  id: string;
+  campusId: typeof CAMPUS_ID;
+  archiveId: string;
+  dayOfWeek: number; // 1..5
+  period: number; // 1..8
+  building: string;
+  floor: string;
+  roomNumber: string;
+  className: string;
+  grade: string;
+  subject: string;
+  teacherName: string;
+  isRelocated: boolean;
+  locationNote: string;
+  archivedBy: string;
+  archivedAt?: Timestamp | null;
 }
 
 export interface PatrolLog {

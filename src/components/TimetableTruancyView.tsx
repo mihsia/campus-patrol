@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import {
+  AlertTriangle,
+  Archive,
   BookOpen,
-  Building2,
   CalendarDays,
+  CheckSquare,
   ClipboardCheck,
   Database,
   Download,
@@ -12,11 +14,15 @@ import {
   Pencil,
   Plus,
   Search,
+  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
 import type {
+  IncidentReport,
+  PatrolLog,
   SchoolSettings,
+  SemesterType,
   StaffProfile,
   TimetableSlot,
 } from '../types/patrol';
@@ -27,6 +33,8 @@ import {
   STANDARD_GRADES,
 } from '../types/patrol';
 import {
+  batchDeleteIncidents,
+  batchDeletePatrolLogs,
   batchDeleteTimetableSlots,
   createTimetableSlot,
   deleteTimetableSlot,
@@ -40,6 +48,8 @@ interface TimetableViewProps {
   isAdmin: boolean;
   schoolSettings: SchoolSettings;
   timetables: TimetableSlot[];
+  patrolLogs: PatrolLog[];
+  incidents: IncidentReport[];
   onGoToBasicData: () => void;
   onJumpToPatrol: (dayOfWeek: number, period: number, slot?: TimetableSlot) => void;
   onSeedDemoData: () => Promise<void>;
@@ -47,11 +57,18 @@ interface TimetableViewProps {
   onActionFeedback: (message: string) => void;
 }
 
+function isLikelyDemoClass(className: string, grade: string): boolean {
+  if (/^高[一二三]/.test(className) || /^高[一二三]/.test(grade)) return true;
+  return ['高一忠', '高一孝', '高一仁', '高二忠', '高二孝', '高三忠'].includes(className.trim());
+}
+
 export const TimetableTruancyView: React.FC<TimetableViewProps> = ({
   profile,
   isAdmin,
   schoolSettings,
   timetables,
+  patrolLogs,
+  incidents,
   onGoToBasicData,
   onJumpToPatrol,
   onSeedDemoData,
@@ -77,6 +94,7 @@ export const TimetableTruancyView: React.FC<TimetableViewProps> = ({
   const [editingSlot, setEditingSlot] = useState<TimetableSlot | null>(null);
   const [confirmClearClass, setConfirmClearClass] = useState(false);
   const [clearingClass, setClearingClass] = useState(false);
+  const [showBatchCleanupModal, setShowBatchCleanupModal] = useState(false);
 
   const buildings = useMemo(() => {
     const ordered = [...schoolSettings.buildings];
@@ -214,8 +232,8 @@ export const TimetableTruancyView: React.FC<TimetableViewProps> = ({
             onClick={onGoToBasicData}
             className="min-h-[42px] px-3.5 py-2 bg-white hover:bg-[#FAF9F5] text-[#3A3F3B] border border-[#DDD8CD] text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
           >
-            <Building2 className="w-3.5 h-3.5 text-[#1E5C4B]" />
-            設定學校與樓棟
+            <Archive className="w-3.5 h-3.5 text-[#1E5C4B]" />
+            學年度歸檔與樓棟設定
           </button>
         </div>
       </div>
@@ -276,11 +294,26 @@ export const TimetableTruancyView: React.FC<TimetableViewProps> = ({
             {timetables.length > 0 && (
               <button
                 type="button"
-                onClick={() => exportTimetableBackupCsv(timetables)}
+                onClick={() =>
+                  exportTimetableBackupCsv(
+                    timetables,
+                    `${schoolSettings.schoolName}_${schoolSettings.academicYear}學年度${schoolSettings.semester}_課表備份.csv`
+                  )
+                }
                 className="min-h-[38px] px-3.5 py-1.5 bg-white hover:bg-[#FAF9F5] text-[#3A3F3B] border border-[#DDD8CD] text-xs font-medium rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
                 備份課表 CSV
+              </button>
+            )}
+            {isAdmin && (timetables.length > 0 || patrolLogs.length > 0 || incidents.length > 0) && (
+              <button
+                type="button"
+                onClick={() => setShowBatchCleanupModal(true)}
+                className="min-h-[38px] px-3.5 py-1.5 bg-white hover:bg-[#FCECE6]/70 text-[#B44326] border border-[#EABEB0] text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                批次清除班級／模擬資料
               </button>
             )}
             {isAdmin && timetables.length === 0 && (
@@ -722,6 +755,8 @@ export const TimetableTruancyView: React.FC<TimetableViewProps> = ({
           mode="create"
           uid={profile.uid}
           buildings={schoolSettings.buildings}
+          academicYear={schoolSettings.academicYear}
+          semester={schoolSettings.semester}
           prefill={addSlotPrefill}
           onClose={() => setAddSlotPrefill(null)}
           onSaved={() => {
@@ -737,11 +772,28 @@ export const TimetableTruancyView: React.FC<TimetableViewProps> = ({
           mode="edit"
           uid={profile.uid}
           buildings={schoolSettings.buildings}
+          academicYear={schoolSettings.academicYear}
+          semester={schoolSettings.semester}
           existingSlot={editingSlot}
           onClose={() => setEditingSlot(null)}
           onSaved={() => {
             setEditingSlot(null);
             onActionFeedback('已更新課表節次內容並同步至巡堂名單');
+          }}
+        />
+      )}
+
+      {/* Batch Class & Demo Data Cleanup Modal */}
+      {showBatchCleanupModal && (
+        <BatchCleanupModal
+          classDirectory={classDirectory}
+          timetables={timetables}
+          patrolLogs={patrolLogs}
+          incidents={incidents}
+          onClose={() => setShowBatchCleanupModal(false)}
+          onCompleted={(msg) => {
+            setShowBatchCleanupModal(false);
+            onActionFeedback(msg);
           }}
         />
       )}
@@ -753,6 +805,8 @@ interface TimetableSlotFormModalProps {
   mode: 'create' | 'edit';
   uid: string;
   buildings: string[];
+  academicYear: string;
+  semester: SemesterType;
   prefill?: {
     dayOfWeek?: number;
     period?: number;
@@ -771,6 +825,8 @@ const TimetableSlotFormModal: React.FC<TimetableSlotFormModalProps> = ({
   mode,
   uid,
   buildings,
+  academicYear,
+  semester,
   prefill,
   existingSlot,
   onClose,
@@ -821,19 +877,24 @@ const TimetableSlotFormModal: React.FC<TimetableSlotFormModalProps> = ({
           locationNote,
         });
       } else {
-        await createTimetableSlot(uid, {
-          dayOfWeek,
-          period,
-          building,
-          floor,
-          roomNumber,
-          className,
-          grade,
-          subject,
-          teacherName,
-          isRelocated,
-          locationNote,
-        });
+        await createTimetableSlot(
+          uid,
+          {
+            dayOfWeek,
+            period,
+            building,
+            floor,
+            roomNumber,
+            className,
+            grade,
+            subject,
+            teacherName,
+            isRelocated,
+            locationNote,
+          },
+          undefined,
+          { academicYear, semester }
+        );
       }
       onSaved();
     } finally {
@@ -1023,6 +1084,307 @@ const TimetableSlotFormModal: React.FC<TimetableSlotFormModalProps> = ({
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+};
+
+interface BatchCleanupModalProps {
+  classDirectory: Array<{
+    className: string;
+    grade: string;
+    building: string;
+    floor: string;
+    roomNumber: string;
+    slotCount: number;
+  }>;
+  timetables: TimetableSlot[];
+  patrolLogs: PatrolLog[];
+  incidents: IncidentReport[];
+  onClose: () => void;
+  onCompleted: (message: string) => void;
+}
+
+const BatchCleanupModal: React.FC<BatchCleanupModalProps> = ({
+  classDirectory,
+  timetables,
+  patrolLogs,
+  incidents,
+  onClose,
+  onCompleted,
+}) => {
+  const demoClassNames = useMemo(
+    () =>
+      classDirectory
+        .filter((c) => isLikelyDemoClass(c.className, c.grade))
+        .map((c) => c.className),
+    [classDirectory]
+  );
+
+  // Pre-select detected demo classes automatically for convenience
+  const [selectedClasses, setSelectedClasses] = useState<string[]>(() => demoClassNames);
+  const [clearRelatedLogs, setClearRelatedLogs] = useState(false);
+  const [clearAllLogsAndIncidents, setClearAllLogsAndIncidents] = useState(false);
+  const [executing, setExecuting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const selectedSet = useMemo(() => new Set(selectedClasses), [selectedClasses]);
+
+  const slotsToDelete = useMemo(
+    () => timetables.filter((t) => selectedSet.has(t.className)),
+    [timetables, selectedSet]
+  );
+
+  const relatedLogsToDelete = useMemo(
+    () => patrolLogs.filter((l) => selectedSet.has(l.className)),
+    [patrolLogs, selectedSet]
+  );
+
+  const relatedIncidentsToDelete = useMemo(
+    () => incidents.filter((inc) => inc.className && selectedSet.has(inc.className)),
+    [incidents, selectedSet]
+  );
+
+  const toggleClass = (clsName: string) => {
+    setSelectedClasses((prev) =>
+      prev.includes(clsName) ? prev.filter((c) => c !== clsName) : [...prev, clsName]
+    );
+  };
+
+  const canExecute =
+    slotsToDelete.length > 0 ||
+    (clearRelatedLogs && (relatedLogsToDelete.length > 0 || relatedIncidentsToDelete.length > 0)) ||
+    (clearAllLogsAndIncidents && (patrolLogs.length > 0 || incidents.length > 0));
+
+  const handleExecuteCleanup = async () => {
+    if (!canExecute) return;
+    setExecuting(true);
+    setError(null);
+    try {
+      let deletedSlots = 0;
+      let deletedLogs = 0;
+      let deletedIncidents = 0;
+
+      if (slotsToDelete.length > 0) {
+        deletedSlots = await batchDeleteTimetableSlots(slotsToDelete.map((s) => s.id));
+      }
+
+      if (clearAllLogsAndIncidents) {
+        if (patrolLogs.length > 0) {
+          deletedLogs = await batchDeletePatrolLogs(patrolLogs.map((l) => l.id));
+        }
+        if (incidents.length > 0) {
+          deletedIncidents = await batchDeleteIncidents(incidents.map((i) => i.id));
+        }
+      } else if (clearRelatedLogs) {
+        if (relatedLogsToDelete.length > 0) {
+          deletedLogs = await batchDeletePatrolLogs(relatedLogsToDelete.map((l) => l.id));
+        }
+        if (relatedIncidentsToDelete.length > 0) {
+          deletedIncidents = await batchDeleteIncidents(relatedIncidentsToDelete.map((i) => i.id));
+        }
+      }
+
+      const summaryParts: string[] = [];
+      if (deletedSlots > 0) {
+        summaryParts.push(`已清除 ${selectedClasses.length} 個班級（共 ${deletedSlots} 節課表）`);
+      }
+      if (deletedLogs > 0) {
+        summaryParts.push(`已清除 ${deletedLogs} 筆巡堂紀錄`);
+      }
+      if (deletedIncidents > 0) {
+        summaryParts.push(`已清除 ${deletedIncidents} 件異常通報`);
+      }
+      onCompleted(summaryParts.join('、') || '已完成清理作業');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '批次清除資料時發生錯誤，請稍後再試');
+    } finally {
+      setExecuting(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-slate-950/55 backdrop-blur-xs flex items-end sm:items-center justify-center sm:p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="bg-white w-full sm:max-w-xl max-h-[92vh] rounded-t-3xl sm:rounded-2xl border border-[#E5E1D8] flex flex-col overflow-hidden">
+        <div className="px-5 py-4 border-b border-[#E5E1D8] bg-[#FAF9F5] flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-bold text-[#1F2421]">批次清除班級課表與模擬資料</h3>
+            <p className="text-xs text-[#7C7A72] mt-0.5">
+              勾選要移除的模擬班級或舊班級，未勾選的正式班級將完整保留
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="關閉視窗"
+            className="min-h-[40px] min-w-[40px] flex items-center justify-center text-[#7C7A72] hover:text-[#1F2421] cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+          {error && (
+            <div className="p-3 rounded-xl bg-[#FCECE6] border border-[#EABEB0] text-[#7A2716]">
+              {error}
+            </div>
+          )}
+
+          {/* Quick Selection Toolbar */}
+          {classDirectory.length > 0 && (
+            <div className="space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-bold text-[#1F2421]">
+                  選擇要清除的班級（已勾選 {selectedClasses.length} / {classDirectory.length} 班）
+                </span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {demoClassNames.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedClasses(demoClassNames)}
+                      className="px-2.5 py-1 rounded-lg bg-[#FBF0E2] hover:bg-[#F5E3CC] text-[#8A4F0F] border border-[#EBD4B4] font-semibold inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      只勾選模擬班級（{demoClassNames.length}）
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedClasses(classDirectory.map((c) => c.className))}
+                    className="px-2.5 py-1 rounded-lg bg-[#FAF9F5] hover:bg-[#F0ECE3] text-[#3A3F3B] border border-[#DDD8CD] font-medium inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <CheckSquare className="w-3 h-3" />
+                    全選
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedClasses([])}
+                    className="px-2.5 py-1 rounded-lg bg-white hover:bg-[#FAF9F5] text-[#7C7A72] border border-[#E5E1D8] font-medium cursor-pointer"
+                  >
+                    取消全選
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-1">
+                {classDirectory.map((cls) => {
+                  const checked = selectedSet.has(cls.className);
+                  const isDemo = isLikelyDemoClass(cls.className, cls.grade);
+                  return (
+                    <label
+                      key={cls.className}
+                      className={`p-3 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition-colors ${
+                        checked
+                          ? 'bg-[#FCECE6]/70 border-[#EABEB0]'
+                          : 'bg-[#FAF9F5] border-[#E5E1D8] hover:border-[#C5BFB2]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleClass(cls.className)}
+                          className="w-4 h-4 accent-[#B44326] shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-[#1F2421] truncate">{cls.className}</span>
+                            {isDemo && (
+                              <span className="text-[10px] font-semibold text-[#8A4F0F] bg-[#FBF0E2] px-1.5 py-0.5 rounded-sm shrink-0">
+                                模擬範例
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-[#7C7A72] truncate">
+                            {cls.building} {cls.roomNumber} · {cls.slotCount} 節
+                          </p>
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Optional Demo Patrol Logs / Incidents Cleanup */}
+          {(patrolLogs.length > 0 || incidents.length > 0) && (
+            <div className="p-3.5 rounded-xl bg-[#FAF9F5] border border-[#E5E1D8] space-y-2.5">
+              <p className="font-bold text-[#1F2421]">連帶清理測試／模擬巡堂紀錄（選填）</p>
+
+              {(relatedLogsToDelete.length > 0 || relatedIncidentsToDelete.length > 0) && (
+                <label className="flex items-start gap-2 text-[#3A3F3B] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={clearRelatedLogs}
+                    disabled={clearAllLogsAndIncidents}
+                    onChange={(e) => setClearRelatedLogs(e.target.checked)}
+                    className="w-4 h-4 accent-[#B44326] mt-0.5 shrink-0"
+                  />
+                  <span>
+                    同時刪除所勾選班級關聯的巡堂紀錄（{relatedLogsToDelete.length} 筆）與異常通報（
+                    {relatedIncidentsToDelete.length} 件）
+                  </span>
+                </label>
+              )}
+
+              <label className="flex items-start gap-2 text-[#3A3F3B] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={clearAllLogsAndIncidents}
+                  onChange={(e) => {
+                    setClearAllLogsAndIncidents(e.target.checked);
+                    if (e.target.checked) setClearRelatedLogs(false);
+                  }}
+                  className="w-4 h-4 accent-[#B44326] mt-0.5 shrink-0"
+                />
+                <span>
+                  清空全部巡堂紀錄（{patrolLogs.length} 筆）與異常通報（{incidents.length} 件），重新開始正式巡堂
+                </span>
+              </label>
+            </div>
+          )}
+
+          <div className="p-3 rounded-xl bg-[#FBF0E2]/70 border border-[#EBD4B4] text-[#8A4F0F] flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>
+              提醒：直接清除後資料將無法復原；若屬於過往學年度的正式課表，建議先至「基本資料 → 學年度切換與課表歷史歸檔」轉入歷史檔保存。
+            </span>
+          </div>
+        </div>
+
+        <div className="px-5 py-3.5 border-t border-[#E5E1D8] bg-[#FAF9F5] flex items-center justify-between gap-3">
+          <span className="text-xs text-[#5C615C]">
+            預計刪除：<strong className="font-mono-num text-[#B44326]">{slotsToDelete.length}</strong> 節課表
+            {clearAllLogsAndIncidents
+              ? ` ＋ ${patrolLogs.length} 筆紀錄 / ${incidents.length} 件通報`
+              : clearRelatedLogs
+                ? ` ＋ ${relatedLogsToDelete.length} 筆紀錄 / ${relatedIncidentsToDelete.length} 件通報`
+                : ''}
+          </span>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={onClose}
+              className="min-h-[40px] px-4 text-xs sm:text-sm text-[#5C615C] hover:text-[#1F2421] cursor-pointer"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              disabled={!canExecute || executing}
+              onClick={handleExecuteCleanup}
+              className="min-h-[40px] px-4 bg-[#B44326] hover:bg-[#93341C] disabled:opacity-45 text-white text-xs sm:text-sm font-semibold rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <Trash2 className="w-4 h-4" />
+              {executing ? '清除中...' : '確定執行清除'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

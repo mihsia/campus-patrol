@@ -36,6 +36,7 @@ import {
   type PatrolLog,
   type SchoolSettings,
   type StaffProfile,
+  type TimetableArchive,
   type TimetableSlot,
 } from './types/patrol';
 import {
@@ -123,6 +124,7 @@ function CampusPatrolApp() {
   // Real-time Firestore Collections
   const [schoolSettings, setSchoolSettings] = useState<SchoolSettings>(DEFAULT_SCHOOL_SETTINGS);
   const [timetables, setTimetables] = useState<TimetableSlot[]>([]);
+  const [timetableArchives, setTimetableArchives] = useState<TimetableArchive[]>([]);
   const [patrolLogs, setPatrolLogs] = useState<PatrolLog[]>([]);
   const [incidents, setIncidents] = useState<IncidentReport[]>([]);
   const [staffList, setStaffList] = useState<StaffProfile[]>([]);
@@ -151,6 +153,7 @@ function CampusPatrolApp() {
   const clearOperationalData = useCallback(() => {
     setSchoolSettings(DEFAULT_SCHOOL_SETTINGS);
     setTimetables([]);
+    setTimetableArchives([]);
     setPatrolLogs([]);
     setIncidents([]);
     setStaffList([]);
@@ -297,6 +300,7 @@ function CampusPatrolApp() {
 
     const settingsDocRef = doc(db, 'schoolSettings', CAMPUS_ID);
     const qTimetables = query(collectionRefs.timetables(), where('campusId', '==', CAMPUS_ID));
+    const qArchives = query(collectionRefs.timetableArchives(), where('campusId', '==', CAMPUS_ID));
     const qPatrols = query(collectionRefs.patrolLogs(), where('campusId', '==', CAMPUS_ID));
     const qIncidents = query(collectionRefs.incidents(), where('campusId', '==', CAMPUS_ID));
     const qStaff = query(collectionRefs.staffProfiles(), where('campusId', '==', CAMPUS_ID));
@@ -337,6 +341,21 @@ function CampusPatrolApp() {
         );
       },
       (error) => handleFirestoreError(error, OperationType.LIST, 'timetables')
+    );
+
+    const unsubArchives = onSnapshot(
+      qArchives,
+      (snap) => {
+        const list = snap.docs
+          .map((d) => ({ id: d.id, ...(d.data() as Omit<TimetableArchive, 'id'>) }))
+          .sort((a, b) => {
+            const ta = a.archivedAt?.toMillis?.() ?? 0;
+            const tb = b.archivedAt?.toMillis?.() ?? 0;
+            return tb - ta;
+          });
+        setTimetableArchives(list);
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'timetableArchives')
     );
 
     const unsubPatrols = onSnapshot(
@@ -398,6 +417,7 @@ function CampusPatrolApp() {
     return () => {
       unsubSettings();
       unsubTimetables();
+      unsubArchives();
       unsubPatrols();
       unsubIncidents();
       unsubStaff();
@@ -671,8 +691,13 @@ function CampusPatrolApp() {
               </span>
             </button>
           ) : (
-            <span className="hidden xl:inline-flex items-center gap-1.5 text-xs text-[#7C7A72] font-mono-num whitespace-nowrap">
-              <span>
+            <button
+              type="button"
+              onClick={() => setActiveNav('basic_data')}
+              title="前往基本資料管理學年度與課表歷史歸檔"
+              className="hidden xl:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg hover:bg-[#F2EFE9] text-xs text-[#5C615C] hover:text-[#1E5C4B] font-mono-num whitespace-nowrap cursor-pointer transition-colors"
+            >
+              <span className="font-semibold">
                 {schoolSettings.academicYear}學年度{schoolSettings.semester}
               </span>
               <span aria-hidden="true">·</span>
@@ -681,7 +706,7 @@ function CampusPatrolApp() {
               <span>
                 {selectedDate}（{selectedDayLabel}）
               </span>
-            </span>
+            </button>
           )}
         </div>
 
@@ -947,6 +972,7 @@ function CampusPatrolApp() {
                 isAdmin={isAdmin}
                 schoolSettings={schoolSettings}
                 timetables={timetables}
+                timetableArchives={timetableArchives}
                 patrolLogs={patrolLogs}
                 onGoToTimetable={() => setActiveNav('timetable')}
                 onActionFeedback={showFeedback}
@@ -959,6 +985,8 @@ function CampusPatrolApp() {
                 isAdmin={isAdmin}
                 schoolSettings={schoolSettings}
                 timetables={timetables}
+                patrolLogs={patrolLogs}
+                incidents={incidents}
                 onGoToBasicData={() => setActiveNav('basic_data')}
                 onJumpToPatrol={(targetDayOfWeek, targetPeriod, slot) => {
                   const parts = selectedDate.split('-').map(Number);

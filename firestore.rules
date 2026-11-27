@@ -169,7 +169,8 @@ service cloud.firestore {
         data.keys().hasOnly([
           'campusId', 'dayOfWeek', 'period', 'building', 'floor', 'roomNumber',
           'className', 'grade', 'subject', 'teacherName', 'expectedCount',
-          'isRelocated', 'locationNote', 'roster', 'createdBy', 'createdAt', 'updatedAt'
+          'isRelocated', 'locationNote', 'roster', 'academicYear', 'semester',
+          'createdBy', 'createdAt', 'updatedAt'
         ]) &&
         data.campusId == 'main-campus' &&
         data.dayOfWeek is int && data.dayOfWeek >= 1 && data.dayOfWeek <= 5 &&
@@ -186,9 +187,65 @@ service cloud.firestore {
         data.locationNote is string && data.locationNote.size() <= 100 &&
         data.roster is list && data.roster.size() <= 60 &&
         (data.roster.size() == 0 || (data.roster[0] is string && data.roster[0].size() >= 1 && data.roster[0].size() <= 60)) &&
+        (!('academicYear' in data) || (data.academicYear is string && data.academicYear.size() >= 1 && data.academicYear.size() <= 10)) &&
+        (!('semester' in data) || (data.semester in ['第一學期', '第二學期'])) &&
         data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
+    }
+
+    function isValidTimetableArchive(data) {
+      return data.keys().hasAll([
+          'campusId', 'academicYear', 'semester', 'label', 'note',
+          'classCount', 'slotCount', 'classNames',
+          'archivedBy', 'archivedByName', 'archivedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'campusId', 'academicYear', 'semester', 'label', 'note',
+          'classCount', 'slotCount', 'classNames',
+          'archivedBy', 'archivedByName', 'archivedAt'
+        ]) &&
+        data.campusId == 'main-campus' &&
+        data.academicYear is string && data.academicYear.size() >= 1 && data.academicYear.size() <= 10 &&
+        data.semester in ['第一學期', '第二學期'] &&
+        data.label is string && data.label.size() >= 1 && data.label.size() <= 80 &&
+        data.note is string && data.note.size() <= 300 &&
+        data.classCount is int && data.classCount >= 0 && data.classCount <= 200 &&
+        data.slotCount is int && data.slotCount >= 0 && data.slotCount <= 2000 &&
+        data.classNames is list && data.classNames.size() <= 60 &&
+        (data.classNames.size() == 0 || (data.classNames[0] is string && data.classNames[0].size() >= 1 && data.classNames[0].size() <= 30)) &&
+        data.archivedBy is string && data.archivedBy.size() >= 1 && data.archivedBy.size() <= 128 &&
+        data.archivedByName is string && data.archivedByName.size() >= 1 && data.archivedByName.size() <= 60 &&
+        data.archivedAt is timestamp;
+    }
+
+    function isValidArchivedTimetableSlot(data, archiveId) {
+      return data.keys().hasAll([
+          'campusId', 'archiveId', 'dayOfWeek', 'period', 'building', 'floor', 'roomNumber',
+          'className', 'grade', 'subject', 'teacherName', 'isRelocated', 'locationNote',
+          'archivedBy', 'archivedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'campusId', 'archiveId', 'dayOfWeek', 'period', 'building', 'floor', 'roomNumber',
+          'className', 'grade', 'subject', 'teacherName', 'isRelocated', 'locationNote',
+          'archivedBy', 'archivedAt'
+        ]) &&
+        data.campusId == 'main-campus' &&
+        isValidId(data.archiveId) &&
+        data.archiveId == archiveId &&
+        data.dayOfWeek is int && data.dayOfWeek >= 1 && data.dayOfWeek <= 5 &&
+        data.period is int && data.period >= 1 && data.period <= 8 &&
+        data.building is string && data.building.size() >= 1 && data.building.size() <= 40 &&
+        data.floor is string && data.floor.size() >= 1 && data.floor.size() <= 20 &&
+        data.roomNumber is string && data.roomNumber.size() >= 1 && data.roomNumber.size() <= 20 &&
+        data.className is string && data.className.size() >= 1 && data.className.size() <= 30 &&
+        data.grade is string && data.grade.size() >= 1 && data.grade.size() <= 20 &&
+        data.subject is string && data.subject.size() >= 1 && data.subject.size() <= 50 &&
+        data.teacherName is string && data.teacherName.size() >= 1 && data.teacherName.size() <= 40 &&
+        data.isRelocated is bool &&
+        data.locationNote is string && data.locationNote.size() <= 100 &&
+        data.archivedBy is string && data.archivedBy.size() >= 1 && data.archivedBy.size() <= 128 &&
+        data.archivedAt is timestamp;
     }
 
     function isValidLeaveRecord(data) {
@@ -480,9 +537,39 @@ service cloud.firestore {
         incoming().diff(existing()).affectedKeys().hasOnly([
           'dayOfWeek', 'period', 'building', 'floor', 'roomNumber',
           'className', 'grade', 'subject', 'teacherName', 'expectedCount',
-          'isRelocated', 'locationNote', 'roster', 'updatedAt'
+          'isRelocated', 'locationNote', 'roster', 'academicYear', 'semester', 'updatedAt'
         ]);
       allow delete: if isValidId(timetableId) && isVerifiedGoogleUser() && isAdmin();
+    }
+
+    // 5b. Historical Academic Year Timetable Archives (Read: Active Users & Admins; Create/Delete: Admin Only; Immutable)
+    match /timetableArchives/{archiveId} {
+      allow get: if isValidId(archiveId) && isVerifiedGoogleUser() && isAuthorizedAccount();
+      allow list: if isVerifiedGoogleUser() && resource.data.campusId == 'main-campus' && isAuthorizedAccount();
+      allow create: if isVerifiedGoogleUser() &&
+        isValidId(archiveId) &&
+        isValidTimetableArchive(incoming()) &&
+        incoming().archivedBy == request.auth.uid &&
+        incoming().archivedAt == request.time &&
+        isAdmin();
+      allow update: if false;
+      allow delete: if isValidId(archiveId) && isVerifiedGoogleUser() && isAdmin();
+
+      // Master-Gate Subcollection: Archived Timetable Slots
+      match /slots/{slotId} {
+        allow get: if isValidId(archiveId) && isValidId(slotId) && isVerifiedGoogleUser() && isAuthorizedAccount();
+        allow list: if isValidId(archiveId) && isVerifiedGoogleUser() && resource.data.campusId == 'main-campus' && isAuthorizedAccount();
+        allow create: if isVerifiedGoogleUser() &&
+          isValidId(archiveId) &&
+          isValidId(slotId) &&
+          isValidArchivedTimetableSlot(incoming(), archiveId) &&
+          incoming().archivedBy == request.auth.uid &&
+          incoming().archivedAt == request.time &&
+          isAdmin() &&
+          exists(/databases/$(database)/documents/timetableArchives/$(archiveId));
+        allow update: if false;
+        allow delete: if isValidId(archiveId) && isValidId(slotId) && isVerifiedGoogleUser() && isAdmin();
+      }
     }
 
     // 6. Approved Student Leave Records
