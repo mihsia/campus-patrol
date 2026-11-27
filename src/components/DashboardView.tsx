@@ -59,6 +59,7 @@ interface DashboardViewProps {
   onNavigate: (section: NavSection) => void;
   onSeedDemoData: () => Promise<void>;
   seeding: boolean;
+  isAdmin: boolean;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -77,6 +78,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigate,
   onSeedDemoData,
   seeding,
+  isAdmin,
 }) => {
   const dayOfWeek = getDayOfWeekFromDate(selectedDate);
 
@@ -217,25 +219,31 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </p>
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-3">
-          <button
-            type="button"
-            onClick={onSeedDemoData}
-            disabled={seeding}
-            className="min-h-[44px] px-5 py-2.5 bg-teal-700 hover:bg-teal-800 disabled:opacity-60 text-white text-sm font-medium rounded-lg transition-colors inline-flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
-          >
-            <Database className="w-4 h-4" />
-            {seeding ? '正在建立範例課表與巡堂資料...' : '一鍵匯入範例全校課表與今日巡堂情境'}
-          </button>
-          <button
-            type="button"
-            onClick={() => onNavigate('timetable')}
-            className="min-h-[44px] px-5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-sm font-medium rounded-lg transition-colors inline-flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
-          >
-            前往手動匯入 CSV 課表
-            <ArrowRight className="w-4 h-4" />
-          </button>
-        </div>
+        {isAdmin ? (
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              type="button"
+              onClick={onSeedDemoData}
+              disabled={seeding}
+              className="min-h-[44px] px-5 py-2.5 bg-teal-700 hover:bg-teal-800 disabled:opacity-60 text-white text-sm font-medium rounded-lg transition-colors inline-flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
+            >
+              <Database className="w-4 h-4" />
+              {seeding ? '正在建立範例課表與巡堂資料...' : '一鍵匯入範例全校課表與今日巡堂情境'}
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate('timetable')}
+              className="min-h-[44px] px-5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-sm font-medium rounded-lg transition-colors inline-flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
+            >
+              前往手動匯入 CSV 課表
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        ) : (
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+            全校課表資料庫由「管理者」統一匯入維護，請聯繫系統管理者建立課表後即可開始巡堂作業。
+          </p>
+        )}
       </div>
     );
   }

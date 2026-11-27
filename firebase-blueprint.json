@@ -23,9 +23,80 @@
       },
       "required": ["uid", "grantedBy", "createdAt"]
     },
+    "AllowedAccount": {
+      "title": "AllowedAccount",
+      "description": "Authoritative Google-only account allowlist and two-tier RBAC registry (admin/user, active/disabled) managed by system admins.",
+      "type": "object",
+      "properties": {
+        "campusId": {
+          "type": "string",
+          "enum": ["main-campus"]
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 120,
+          "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "department": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "jobTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "user"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "disabled"]
+        },
+        "uid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "createdBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "campusId",
+        "email",
+        "displayName",
+        "department",
+        "jobTitle",
+        "role",
+        "status",
+        "uid",
+        "createdBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
     "StaffProfile": {
       "title": "StaffProfile",
-      "description": "Non-PII staff display profile visible to verified campus staff.",
+      "description": "Non-PII staff display profile visible to active authorized Google campus accounts.",
       "type": "object",
       "properties": {
         "uid": {
@@ -55,7 +126,7 @@
         },
         "role": {
           "type": "string",
-          "enum": ["admin", "inspector", "viewer"]
+          "enum": ["admin", "user"]
         },
         "createdAt": {
           "type": "string",
@@ -603,6 +674,10 @@
     "/admins/{userId}": {
       "schema": { "$ref": "#/entities/AdminRecord" },
       "description": "Trusted admin role assignment documents."
+    },
+    "/allowedAccounts/{accountId}": {
+      "schema": { "$ref": "#/entities/AllowedAccount" },
+      "description": "Authoritative Google-only account allowlist and two-tier RBAC registry (admin/user, active/disabled)."
     },
     "/staffProfiles/{userId}": {
       "schema": { "$ref": "#/entities/StaffProfile" },

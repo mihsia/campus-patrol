@@ -12,19 +12,55 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isVerifiedUser() {
-      return isSignedIn() && request.auth.token.email_verified == true;
+    // Strictly enforce verified Google account login only
+    function isVerifiedGoogleUser() {
+      return isSignedIn() &&
+        request.auth.token.email_verified == true &&
+        request.auth.token.email is string &&
+        request.auth.token.email.size() >= 3 &&
+        request.auth.token.email.size() <= 120 &&
+        request.auth.token.firebase.sign_in_provider == 'google.com';
+    }
+
+    function userEmailLower() {
+      return request.auth.token.email.lower();
+    }
+
+    function userEmailKey() {
+      return request.auth.token.email.lower().replace('[^a-z0-9]', '_');
+    }
+
+    function isBootstrapAdmin() {
+      return isVerifiedGoogleUser() && userEmailLower() == 'mihsia@gmail.com';
+    }
+
+    // Active allowlisted Google account (Tier 1 admin or Tier 2 user)
+    function isAuthorizedAccount() {
+      return isVerifiedGoogleUser() && (
+        isBootstrapAdmin() ||
+        (
+          exists(/databases/$(database)/documents/allowedAccounts/$(userEmailKey())) &&
+          get(/databases/$(database)/documents/allowedAccounts/$(userEmailKey())).data.email == userEmailLower() &&
+          get(/databases/$(database)/documents/allowedAccounts/$(userEmailKey())).data.status == 'active'
+        )
+      );
+    }
+
+    // Tier 1: System Admin (bootstrapped admin OR active admin in allowedAccounts)
+    function isAdmin() {
+      return isVerifiedGoogleUser() && (
+        isBootstrapAdmin() ||
+        (
+          exists(/databases/$(database)/documents/allowedAccounts/$(userEmailKey())) &&
+          get(/databases/$(database)/documents/allowedAccounts/$(userEmailKey())).data.email == userEmailLower() &&
+          get(/databases/$(database)/documents/allowedAccounts/$(userEmailKey())).data.status == 'active' &&
+          get(/databases/$(database)/documents/allowedAccounts/$(userEmailKey())).data.role == 'admin'
+        )
+      );
     }
 
     function isOwner(userId) {
-      return isVerifiedUser() && request.auth.uid == userId;
-    }
-
-    function isAdmin() {
-      return isVerifiedUser() && (
-        request.auth.token.email == 'mihsia@gmail.com' ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-      );
+      return isVerifiedGoogleUser() && request.auth.uid == userId && isAuthorizedAccount();
     }
 
     function isValidId(id) {
@@ -54,6 +90,32 @@ service cloud.firestore {
         data.createdAt is timestamp;
     }
 
+    function isValidAllowedAccount(data, accountId) {
+      return data.keys().hasAll([
+          'campusId', 'email', 'displayName', 'department', 'jobTitle',
+          'role', 'status', 'uid', 'createdBy', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'campusId', 'email', 'displayName', 'department', 'jobTitle',
+          'role', 'status', 'uid', 'createdBy', 'createdAt', 'updatedAt'
+        ]) &&
+        data.campusId == 'main-campus' &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 120 &&
+        data.email == data.email.lower() &&
+        data.email.matches('^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$') &&
+        accountId == data.email.replace('[^a-z0-9]', '_') &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+        data.department is string && data.department.size() >= 1 && data.department.size() <= 60 &&
+        data.jobTitle is string && data.jobTitle.size() >= 1 && data.jobTitle.size() <= 60 &&
+        data.role in ['admin', 'user'] &&
+        data.status in ['active', 'disabled'] &&
+        data.uid is string && data.uid.size() <= 128 &&
+        (data.uid == '' || isValidId(data.uid)) &&
+        data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
     function isValidStaffProfile(data, userId) {
       return data.keys().hasAll(['uid', 'campusId', 'displayName', 'department', 'jobTitle', 'role', 'createdAt', 'updatedAt']) &&
         data.keys().hasOnly(['uid', 'campusId', 'displayName', 'department', 'jobTitle', 'role', 'createdAt', 'updatedAt']) &&
@@ -63,7 +125,7 @@ service cloud.firestore {
         data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
         data.department is string && data.department.size() >= 1 && data.department.size() <= 60 &&
         data.jobTitle is string && data.jobTitle.size() >= 1 && data.jobTitle.size() <= 60 &&
-        data.role in ['admin', 'inspector', 'viewer'] &&
+        data.role in ['admin', 'user'] &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -233,32 +295,79 @@ service cloud.firestore {
 
     // --- Collection Rules ---
 
-    // 1. Admins Registry
+    // 1. Admins Registry (Legacy / Mirror)
     match /admins/{userId} {
-      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow get: if isValidId(userId) && isVerifiedGoogleUser() && (isOwner(userId) || isAdmin());
       allow list: if false;
-      allow create: if isVerifiedUser() &&
+      allow create: if isVerifiedGoogleUser() &&
         isValidId(userId) &&
         isValidAdminRecord(incoming(), userId) &&
         incoming().grantedBy == request.auth.uid &&
         incoming().createdAt == request.time &&
         isAdmin();
       allow update: if false;
-      allow delete: if isValidId(userId) && isAdmin();
+      allow delete: if isValidId(userId) && isVerifiedGoogleUser() && isAdmin();
     }
 
-    // 2. Staff Profiles (Non-PII Public Directory)
+    // 2. Authorized Google Accounts Allowlist & Two-Tier RBAC (PII Protected)
+    match /allowedAccounts/{accountId} {
+      // Any verified Google user may check ONLY their own emailKey doc; Admins may get any
+      allow get: if isValidId(accountId) && isVerifiedGoogleUser() && (
+        accountId == userEmailKey() || isAdmin()
+      );
+      // Only Admins may list the account management directory (contains email PII)
+      allow list: if isVerifiedGoogleUser() && resource.data.campusId == 'main-campus' && isAdmin();
+      allow create: if isVerifiedGoogleUser() &&
+        isValidId(accountId) &&
+        isValidAllowedAccount(incoming(), accountId) &&
+        incoming().createdBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+      allow update: if isVerifiedGoogleUser() &&
+        isValidId(accountId) &&
+        isValidAllowedAccount(incoming(), accountId) &&
+        incoming().campusId == existing().campusId &&
+        incoming().email == existing().email &&
+        incoming().createdBy == existing().createdBy &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action 1: Admin edits account metadata, role (admin/user), or status (active/disabled)
+          // Bootstrap admin mihsia@gmail.com cannot be demoted or disabled
+          (isAdmin() &&
+            (existing().email != 'mihsia@gmail.com' || (incoming().role == 'admin' && incoming().status == 'active')) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'department', 'jobTitle', 'role', 'status', 'updatedAt'])) ||
+          // Action 2: Authorized Google user binds their Firebase Auth UID on login
+          (accountId == userEmailKey() &&
+            existing().email == userEmailLower() &&
+            existing().status == 'active' &&
+            incoming().uid == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['uid', 'updatedAt'])) ||
+          // Action 3: Authorized Google user edits own displayName / department / jobTitle (role & status immutable)
+          (accountId == userEmailKey() &&
+            existing().email == userEmailLower() &&
+            existing().status == 'active' &&
+            incoming().role == existing().role &&
+            incoming().status == existing().status &&
+            incoming().uid == existing().uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'department', 'jobTitle', 'updatedAt']))
+        );
+      allow delete: if isValidId(accountId) && isVerifiedGoogleUser() && existing().email != 'mihsia@gmail.com' && isAdmin();
+    }
+
+    // 3. Staff Profiles (Non-PII Public Directory for Active Authorized Accounts)
     match /staffProfiles/{userId} {
-      allow get: if isValidId(userId) && isVerifiedUser();
-      allow list: if isVerifiedUser() && resource.data.campusId == 'main-campus';
-      allow create: if isVerifiedUser() &&
+      allow get: if isValidId(userId) && isVerifiedGoogleUser() && isAuthorizedAccount();
+      allow list: if isVerifiedGoogleUser() && resource.data.campusId == 'main-campus' && isAuthorizedAccount();
+      allow create: if isVerifiedGoogleUser() &&
         isValidId(userId) &&
         isValidStaffProfile(incoming(), userId) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
         request.auth.uid == userId &&
-        (incoming().role == 'inspector' || (incoming().role == 'admin' && isAdmin()));
-      allow update: if isVerifiedUser() &&
+        isAuthorizedAccount() &&
+        (incoming().role == 'user' || (incoming().role == 'admin' && isAdmin()));
+      allow update: if isVerifiedGoogleUser() &&
         isValidId(userId) &&
         isValidStaffProfile(incoming(), userId) &&
         incoming().uid == existing().uid &&
@@ -267,24 +376,24 @@ service cloud.firestore {
         incoming().updatedAt == request.time && (
           // Action: Admin role & profile management
           (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'department', 'jobTitle', 'role', 'updatedAt'])) ||
-          // Action: Self profile edit (role strictly immutable)
+          // Action: Self profile sync/edit (can only set admin if currently isAdmin)
           (isOwner(userId) &&
-            incoming().role == existing().role &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'department', 'jobTitle', 'updatedAt']))
+            (incoming().role == 'user' || (incoming().role == 'admin' && isAdmin())) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'department', 'jobTitle', 'role', 'updatedAt']))
         );
-      allow delete: if isValidId(userId) && isAdmin();
+      allow delete: if isValidId(userId) && isVerifiedGoogleUser() && isAdmin();
     }
 
-    // 3. Isolated User PII (Owner & Admin Only)
+    // 4. Isolated User PII (Owner & Admin Only)
     match /userPrivate/{userId} {
-      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow get: if isValidId(userId) && isVerifiedGoogleUser() && (isOwner(userId) || isAdmin());
       allow list: if false;
-      allow create: if isVerifiedUser() &&
+      allow create: if isVerifiedGoogleUser() &&
         isValidId(userId) &&
         isValidUserPrivate(incoming(), userId) &&
         incoming().updatedAt == request.time &&
         isOwner(userId);
-      allow update: if isVerifiedUser() &&
+      allow update: if isVerifiedGoogleUser() &&
         isValidId(userId) &&
         isValidUserPrivate(incoming(), userId) &&
         incoming().uid == existing().uid &&
@@ -292,73 +401,76 @@ service cloud.firestore {
           (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'updatedAt'])) ||
           (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'updatedAt']))
         );
-      allow delete: if isValidId(userId) && isAdmin();
+      allow delete: if isValidId(userId) && isVerifiedGoogleUser() && isAdmin();
     }
 
-    // 4. School Timetables
+    // 5. School Timetables (Read: Active Users & Admins; Write/Delete: Admin Only)
     match /timetables/{timetableId} {
-      allow get: if isValidId(timetableId) && isVerifiedUser();
-      allow list: if isVerifiedUser() && resource.data.campusId == 'main-campus';
-      allow create: if isVerifiedUser() &&
+      allow get: if isValidId(timetableId) && isVerifiedGoogleUser() && isAuthorizedAccount();
+      allow list: if isVerifiedGoogleUser() && resource.data.campusId == 'main-campus' && isAuthorizedAccount();
+      allow create: if isVerifiedGoogleUser() &&
         isValidId(timetableId) &&
         isValidTimetable(incoming()) &&
         incoming().createdBy == request.auth.uid &&
         incoming().createdAt == request.time &&
-        incoming().updatedAt == request.time;
-      allow update: if isVerifiedUser() &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+      allow update: if isVerifiedGoogleUser() &&
         isValidId(timetableId) &&
         isValidTimetable(incoming()) &&
         incoming().campusId == existing().campusId &&
         incoming().createdBy == existing().createdBy &&
         incoming().createdAt == existing().createdAt &&
-        incoming().updatedAt == request.time && (
-          // Action: Edit timetable slot details & roster
-          (incoming().diff(existing()).affectedKeys().hasOnly([
-            'dayOfWeek', 'period', 'building', 'floor', 'roomNumber',
-            'className', 'grade', 'subject', 'teacherName', 'expectedCount',
-            'isRelocated', 'locationNote', 'roster', 'updatedAt'
-          ]) && (existing().createdBy == request.auth.uid || isAdmin()))
-        );
-      allow delete: if isValidId(timetableId) && (existing().createdBy == request.auth.uid || isAdmin());
+        incoming().updatedAt == request.time &&
+        isAdmin() &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'dayOfWeek', 'period', 'building', 'floor', 'roomNumber',
+          'className', 'grade', 'subject', 'teacherName', 'expectedCount',
+          'isRelocated', 'locationNote', 'roster', 'updatedAt'
+        ]);
+      allow delete: if isValidId(timetableId) && isVerifiedGoogleUser() && isAdmin();
     }
 
-    // 5. Approved Student Leave Records
+    // 6. Approved Student Leave Records
     match /leaveRecords/{leaveId} {
-      allow get: if isValidId(leaveId) && isVerifiedUser();
-      allow list: if isVerifiedUser() && resource.data.campusId == 'main-campus';
-      allow create: if isVerifiedUser() &&
+      allow get: if isValidId(leaveId) && isVerifiedGoogleUser() && isAuthorizedAccount();
+      allow list: if isVerifiedGoogleUser() && resource.data.campusId == 'main-campus' && isAuthorizedAccount();
+      allow create: if isVerifiedGoogleUser() &&
         isValidId(leaveId) &&
         isValidLeaveRecord(incoming()) &&
         incoming().createdBy == request.auth.uid &&
         incoming().createdAt == request.time &&
-        incoming().updatedAt == request.time;
-      allow update: if isVerifiedUser() &&
+        incoming().updatedAt == request.time &&
+        isAuthorizedAccount();
+      allow update: if isVerifiedGoogleUser() &&
         isValidId(leaveId) &&
         isValidLeaveRecord(incoming()) &&
         incoming().campusId == existing().campusId &&
         incoming().createdBy == existing().createdBy &&
         incoming().createdAt == existing().createdAt &&
-        incoming().updatedAt == request.time && (
+        incoming().updatedAt == request.time &&
+        isAuthorizedAccount() && (
           // Action: Update leave details
           (incoming().diff(existing()).affectedKeys().hasOnly([
             'leaveType', 'periods', 'reason', 'approvedBy', 'updatedAt'
           ]) && (existing().createdBy == request.auth.uid || isAdmin()))
         );
-      allow delete: if isValidId(leaveId) && (existing().createdBy == request.auth.uid || isAdmin());
+      allow delete: if isValidId(leaveId) && isVerifiedGoogleUser() && isAuthorizedAccount() && (existing().createdBy == request.auth.uid || isAdmin());
     }
 
-    // 6. Classroom Patrol Logs (Linked to Timetable via exists())
+    // 7. Classroom Patrol Logs (Linked to Timetable via exists())
     match /patrolLogs/{logId} {
-      allow get: if isValidId(logId) && isVerifiedUser();
-      allow list: if isVerifiedUser() && resource.data.campusId == 'main-campus';
-      allow create: if isVerifiedUser() &&
+      allow get: if isValidId(logId) && isVerifiedGoogleUser() && isAuthorizedAccount();
+      allow list: if isVerifiedGoogleUser() && resource.data.campusId == 'main-campus' && isAuthorizedAccount();
+      allow create: if isVerifiedGoogleUser() &&
         isValidId(logId) &&
         isValidPatrolLog(incoming()) &&
         incoming().inspectorId == request.auth.uid &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
+        isAuthorizedAccount() &&
         exists(/databases/$(database)/documents/timetables/$(incoming().timetableId));
-      allow update: if isVerifiedUser() &&
+      allow update: if isVerifiedGoogleUser() &&
         isValidId(logId) &&
         isValidPatrolLog(incoming()) &&
         incoming().campusId == existing().campusId &&
@@ -366,7 +478,8 @@ service cloud.firestore {
         incoming().timetableId == existing().timetableId &&
         incoming().inspectorId == existing().inspectorId &&
         incoming().createdAt == existing().createdAt &&
-        incoming().updatedAt == request.time && (
+        incoming().updatedAt == request.time &&
+        isAuthorizedAccount() && (
           // Action: Inspector updates their patrol observation
           (existing().inspectorId == request.auth.uid &&
             incoming().diff(existing()).affectedKeys().hasOnly([
@@ -378,21 +491,22 @@ service cloud.firestore {
               'teacherPresent', 'actualCount', 'status', 'note', 'inspectorName', 'updatedAt'
             ]))
         );
-      allow delete: if isValidId(logId) && (existing().inspectorId == request.auth.uid || isAdmin());
+      allow delete: if isValidId(logId) && isVerifiedGoogleUser() && isAuthorizedAccount() && (existing().inspectorId == request.auth.uid || isAdmin());
     }
 
-    // 7. Student Absence & Automated Truancy Records (Linked to Timetable via exists())
+    // 8. Student Absence & Automated Truancy Records (Linked to Timetable via exists())
     match /absences/{absenceId} {
-      allow get: if isValidId(absenceId) && isVerifiedUser();
-      allow list: if isVerifiedUser() && resource.data.campusId == 'main-campus';
-      allow create: if isVerifiedUser() &&
+      allow get: if isValidId(absenceId) && isVerifiedGoogleUser() && isAuthorizedAccount();
+      allow list: if isVerifiedGoogleUser() && resource.data.campusId == 'main-campus' && isAuthorizedAccount();
+      allow create: if isVerifiedGoogleUser() &&
         isValidId(absenceId) &&
         isValidAbsenceRecord(incoming()) &&
         incoming().recordedBy == request.auth.uid &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
+        isAuthorizedAccount() &&
         exists(/databases/$(database)/documents/timetables/$(incoming().timetableId));
-      allow update: if isVerifiedUser() &&
+      allow update: if isVerifiedGoogleUser() &&
         isValidId(absenceId) &&
         isValidAbsenceRecord(incoming()) &&
         incoming().campusId == existing().campusId &&
@@ -400,8 +514,9 @@ service cloud.firestore {
         incoming().timetableId == existing().timetableId &&
         incoming().recordedBy == existing().recordedBy &&
         incoming().createdAt == existing().createdAt &&
-        incoming().updatedAt == request.time && (
-          // Action: Automated verification / leave reconciliation by staff
+        incoming().updatedAt == request.time &&
+        isAuthorizedAccount() && (
+          // Action: Automated verification / leave reconciliation by active user
           (incoming().diff(existing()).affectedKeys().hasOnly([
             'observedType', 'autoStatus', 'riskLevel', 'verified', 'note', 'updatedAt'
           ])) ||
@@ -411,22 +526,23 @@ service cloud.firestore {
               'observedType', 'autoStatus', 'riskLevel', 'verified', 'note', 'seatNumber', 'studentName', 'updatedAt'
             ]))
         );
-      allow delete: if isValidId(absenceId) && (existing().recordedBy == request.auth.uid || isAdmin());
+      allow delete: if isValidId(absenceId) && isVerifiedGoogleUser() && isAuthorizedAccount() && (existing().recordedBy == request.auth.uid || isAdmin());
     }
 
-    // 8. Abnormal Incident Reports (Terminal State Locked at 'resolved')
+    // 9. Abnormal Incident Reports (Terminal State Locked at 'resolved')
     match /incidents/{incidentId} {
-      allow get: if isValidId(incidentId) && isVerifiedUser();
-      allow list: if isVerifiedUser() && resource.data.campusId == 'main-campus';
-      allow create: if isVerifiedUser() &&
+      allow get: if isValidId(incidentId) && isVerifiedGoogleUser() && isAuthorizedAccount();
+      allow list: if isVerifiedGoogleUser() && resource.data.campusId == 'main-campus' && isAuthorizedAccount();
+      allow create: if isVerifiedGoogleUser() &&
         isValidId(incidentId) &&
         isValidIncident(incoming()) &&
         incoming().reporterId == request.auth.uid &&
         incoming().status == 'open' &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
+        isAuthorizedAccount() &&
         (incoming().timetableId == '' || exists(/databases/$(database)/documents/timetables/$(incoming().timetableId)));
-      allow update: if isVerifiedUser() &&
+      allow update: if isVerifiedGoogleUser() &&
         isValidId(incidentId) &&
         isValidIncident(incoming()) &&
         incoming().campusId == existing().campusId &&
@@ -434,7 +550,8 @@ service cloud.firestore {
         incoming().timetableId == existing().timetableId &&
         incoming().reporterId == existing().reporterId &&
         incoming().createdAt == existing().createdAt &&
-        incoming().updatedAt == request.time && (
+        incoming().updatedAt == request.time &&
+        isAuthorizedAccount() && (
           // Action: Claim / start handling an open incident (non-terminal)
           (existing().status == 'open' &&
             incoming().status == 'in_progress' &&
@@ -459,7 +576,7 @@ service cloud.firestore {
           (isAdmin() &&
             incoming().diff(existing()).affectedKeys().hasOnly(['status', 'severity', 'title', 'description', 'handlerId', 'handlerName', 'resolutionNote', 'updatedAt']))
         );
-      allow delete: if isValidId(incidentId) && isAdmin();
+      allow delete: if isValidId(incidentId) && isVerifiedGoogleUser() && isAdmin();
     }
   }
 }

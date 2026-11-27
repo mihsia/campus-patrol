@@ -10,6 +10,8 @@ import {
 } from 'firebase/firestore';
 import type {
   AbsenceRecord,
+  AccountStatus,
+  AllowedAccount,
   AutoAbsenceStatus,
   IncidentCategory,
   IncidentReport,
@@ -25,11 +27,14 @@ import type {
   StaffRole,
   TimetableSlot,
 } from '../types/patrol';
-import { BOOTSTRAP_ADMIN_EMAIL, CAMPUS_ID } from '../types/patrol';
+import { BOOTSTRAP_ADMIN_EMAIL, CAMPUS_ID, normalizeStaffRole } from '../types/patrol';
 import { db, handleFirestoreError, OperationType } from './firebase';
 import {
   clampInt,
   clampString,
+  emailToAccountId,
+  isValidEmailFormat,
+  normalizeEmail,
   sanitizeDate,
   sanitizeId,
   sanitizePeriods,
@@ -37,42 +42,142 @@ import {
 } from './validation';
 import type { ParsedTimetableImportRow } from './exportReports';
 
-export async function ensureUserAccountDocs(params: {
+export type GoogleAccountAuthResult =
+  | {
+      status: 'authorized';
+      profile: StaffProfile;
+      account: AllowedAccount;
+      isAdmin: boolean;
+    }
+  | {
+      status: 'unauthorized';
+      email: string;
+    }
+  | {
+      status: 'disabled';
+      email: string;
+      displayName: string;
+      department: string;
+    };
+
+export async function verifyAndBootstrapGoogleUser(params: {
   uid: string;
   email: string;
   displayName: string;
-}): Promise<{ profile: StaffProfile; isAdmin: boolean }> {
+}): Promise<GoogleAccountAuthResult> {
   const { uid, email, displayName } = params;
+  const normalizedEmail = normalizeEmail(email);
   const safeUid = sanitizeId(uid, 'user');
+  const accountId = emailToAccountId(normalizedEmail);
+  const isBootstrapAdmin = normalizedEmail === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
+
+  const allowedRef = doc(db, 'allowedAccounts', accountId);
   const profileRef = doc(db, 'staffProfiles', safeUid);
   const privateRef = doc(db, 'userPrivate', safeUid);
-  const adminRef = doc(db, 'admins', safeUid);
 
-  const isBootstrapAdmin = email.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
-
-  let hasAdminDoc = false;
+  // 1. Check authoritative Google allowlist document
+  let accSnap;
   try {
-    const adminSnap = await getDoc(adminRef);
-    hasAdminDoc = adminSnap.exists();
+    accSnap = await getDoc(allowedRef);
   } catch (err) {
-    // Non-admin checking own admin doc is allowed by rule `isOwner(userId)`
-    handleFirestoreError(err, OperationType.GET, `admins/${safeUid}`);
+    handleFirestoreError(err, OperationType.GET, `allowedAccounts/${accountId}`);
   }
 
-  const isAdmin = isBootstrapAdmin || hasAdminDoc;
+  let account: AllowedAccount;
 
-  // Ensure private PII record exists / updated
+  if (!accSnap.exists()) {
+    if (!isBootstrapAdmin) {
+      return { status: 'unauthorized', email: normalizedEmail };
+    }
+
+    // Auto-bootstrap primary system administrator record on first sign-in
+    const bootstrapPayload = {
+      campusId: CAMPUS_ID,
+      email: normalizedEmail,
+      displayName: clampString(displayName || '系統管理員', 60, '系統管理員'),
+      department: '校長室',
+      jobTitle: '系統管理者',
+      role: 'admin' as StaffRole,
+      status: 'active' as AccountStatus,
+      uid: safeUid,
+      createdBy: safeUid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+    try {
+      await setDoc(allowedRef, bootstrapPayload);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `allowedAccounts/${accountId}`);
+    }
+    account = {
+      id: accountId,
+      campusId: CAMPUS_ID,
+      email: normalizedEmail,
+      displayName: bootstrapPayload.displayName,
+      department: bootstrapPayload.department,
+      jobTitle: bootstrapPayload.jobTitle,
+      role: 'admin',
+      status: 'active',
+      uid: safeUid,
+      createdBy: safeUid,
+    };
+  } else {
+    const raw = accSnap.data() as Omit<AllowedAccount, 'id'>;
+    if (!isBootstrapAdmin && raw.status !== 'active') {
+      return {
+        status: 'disabled',
+        email: normalizedEmail,
+        displayName: raw.displayName || displayName || normalizedEmail,
+        department: raw.department || '未指定處室',
+      };
+    }
+
+    const resolvedRole: StaffRole = isBootstrapAdmin ? 'admin' : normalizeStaffRole(raw.role);
+    const resolvedStatus: AccountStatus = isBootstrapAdmin ? 'active' : raw.status;
+
+    // Bind Firebase Auth UID on first Google sign-in (or UID update)
+    if (raw.uid !== safeUid) {
+      try {
+        await updateDoc(allowedRef, {
+          uid: safeUid,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `allowedAccounts/${accountId}`);
+      }
+    }
+
+    account = {
+      id: accountId,
+      campusId: CAMPUS_ID,
+      email: raw.email,
+      displayName: raw.displayName,
+      department: raw.department,
+      jobTitle: raw.jobTitle,
+      role: resolvedRole,
+      status: resolvedStatus,
+      uid: safeUid,
+      createdBy: raw.createdBy,
+      createdAt: raw.createdAt,
+      updatedAt: raw.updatedAt,
+    };
+  }
+
+  const isAdmin = isBootstrapAdmin || account.role === 'admin';
+  const resolvedRole: StaffRole = isAdmin ? 'admin' : 'user';
+
+  // 2. Ensure isolated PII doc exists / updated
   try {
     const privSnap = await getDoc(privateRef);
     if (!privSnap.exists()) {
       await setDoc(privateRef, {
         uid: safeUid,
-        email: clampString(email, 120, 'staff@school.edu.tw'),
+        email: normalizedEmail,
         updatedAt: serverTimestamp(),
       });
-    } else if (privSnap.data()?.email !== email) {
+    } else if (privSnap.data()?.email !== normalizedEmail) {
       await updateDoc(privateRef, {
-        email: clampString(email, 120, 'staff@school.edu.tw'),
+        email: normalizedEmail,
         updatedAt: serverTimestamp(),
       });
     }
@@ -80,39 +185,62 @@ export async function ensureUserAccountDocs(params: {
     handleFirestoreError(err, OperationType.WRITE, `userPrivate/${safeUid}`);
   }
 
-  // Ensure public staff profile exists
+  // 3. Synchronize non-PII staff profile with authoritative allowedAccount
   try {
     const profSnap = await getDoc(profileRef);
+    const desiredName = clampString(account.displayName || displayName || '使用者', 60, '使用者');
+    const desiredDept = clampString(account.department || '學務處', 60, '學務處');
+    const desiredTitle = clampString(account.jobTitle || (isAdmin ? '系統管理者' : '巡堂使用者'), 60, '巡堂使用者');
+
     if (!profSnap.exists()) {
       const initialProfile: Omit<StaffProfile, 'createdAt' | 'updatedAt'> = {
         uid: safeUid,
         campusId: CAMPUS_ID,
-        displayName: clampString(displayName || email.split('@')[0] || '巡堂教師', 60, '巡堂教師'),
-        department: isAdmin ? '學務處' : '學務處生教組',
-        jobTitle: isAdmin ? '學務主任／系統管理員' : '值日巡堂教師',
-        role: isAdmin ? 'admin' : 'inspector',
+        displayName: desiredName,
+        department: desiredDept,
+        jobTitle: desiredTitle,
+        role: resolvedRole,
       };
       await setDoc(profileRef, {
         ...initialProfile,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      return { profile: initialProfile, isAdmin };
+      return { status: 'authorized', profile: initialProfile, account, isAdmin };
     }
 
-    const data = profSnap.data() as StaffProfile;
+    const existingProf = profSnap.data() as StaffProfile;
+    const normalizedExistingRole = normalizeStaffRole(existingProf.role);
+    if (
+      existingProf.displayName !== desiredName ||
+      existingProf.department !== desiredDept ||
+      existingProf.jobTitle !== desiredTitle ||
+      normalizedExistingRole !== resolvedRole ||
+      (existingProf.role as string) !== resolvedRole
+    ) {
+      await updateDoc(profileRef, {
+        displayName: desiredName,
+        department: desiredDept,
+        jobTitle: desiredTitle,
+        role: resolvedRole,
+        updatedAt: serverTimestamp(),
+      });
+    }
+
     return {
+      status: 'authorized',
       profile: {
-        uid: data.uid,
+        uid: safeUid,
         campusId: CAMPUS_ID,
-        displayName: data.displayName,
-        department: data.department,
-        jobTitle: data.jobTitle,
-        role: isAdmin ? 'admin' : data.role,
-        createdAt: data.createdAt,
-        updatedAt: data.updatedAt,
+        displayName: desiredName,
+        department: desiredDept,
+        jobTitle: desiredTitle,
+        role: resolvedRole,
+        createdAt: existingProf.createdAt,
+        updatedAt: existingProf.updatedAt,
       },
-      isAdmin: isAdmin || data.role === 'admin',
+      account,
+      isAdmin,
     };
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `staffProfiles/${safeUid}`);
@@ -121,52 +249,157 @@ export async function ensureUserAccountDocs(params: {
 
 export async function updateOwnStaffProfile(
   uid: string,
+  email: string,
   updates: { displayName: string; department: string; jobTitle: string }
 ): Promise<void> {
   const safeUid = sanitizeId(uid, 'user');
-  const path = `staffProfiles/${safeUid}`;
+  const accountId = emailToAccountId(email);
+  const safeName = clampString(updates.displayName, 60, '巡堂教師');
+  const safeDept = clampString(updates.department, 60, '學務處');
+  const safeTitle = clampString(updates.jobTitle, 60, '巡堂人員');
+
   try {
     await updateDoc(doc(db, 'staffProfiles', safeUid), {
-      displayName: clampString(updates.displayName, 60, '巡堂教師'),
-      department: clampString(updates.department, 60, '學務處'),
-      jobTitle: clampString(updates.jobTitle, 60, '巡堂人員'),
+      displayName: safeName,
+      department: safeDept,
+      jobTitle: safeTitle,
       updatedAt: serverTimestamp(),
     });
   } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, path);
+    handleFirestoreError(err, OperationType.UPDATE, `staffProfiles/${safeUid}`);
+  }
+
+  try {
+    await updateDoc(doc(db, 'allowedAccounts', accountId), {
+      displayName: safeName,
+      department: safeDept,
+      jobTitle: safeTitle,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `allowedAccounts/${accountId}`);
   }
 }
 
-export async function adminUpdateStaffRole(
+export async function adminCreateAllowedAccount(
   actorUid: string,
-  targetUid: string,
-  newRole: StaffRole
-): Promise<void> {
-  const safeTarget = sanitizeId(targetUid, 'user');
-  const safeActor = sanitizeId(actorUid, 'user');
+  input: {
+    email: string;
+    displayName: string;
+    department: string;
+    jobTitle: string;
+    role: StaffRole;
+  }
+): Promise<string> {
+  const normalizedEmail = normalizeEmail(input.email);
+  if (!isValidEmailFormat(normalizedEmail)) {
+    throw new Error('請輸入有效的 Google 帳號 Email 格式');
+  }
+  const accountId = emailToAccountId(normalizedEmail);
+  const accRef = doc(db, 'allowedAccounts', accountId);
+
   try {
-    await updateDoc(doc(db, 'staffProfiles', safeTarget), {
-      role: newRole,
+    const existing = await getDoc(accRef);
+    if (existing.exists()) {
+      throw new Error(`此 Google 帳號（${normalizedEmail}）已存在於授權名單中`);
+    }
+    await setDoc(accRef, {
+      campusId: CAMPUS_ID,
+      email: normalizedEmail,
+      displayName: clampString(input.displayName, 60, normalizedEmail.split('@')[0] || '使用者'),
+      department: clampString(input.department, 60, '學務處'),
+      jobTitle: clampString(input.jobTitle, 60, input.role === 'admin' ? '系統管理者' : '巡堂使用者'),
+      role: input.role,
+      status: 'active',
+      uid: '',
+      createdBy: sanitizeId(actorUid, 'admin'),
+      createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-    const adminDocRef = doc(db, 'admins', safeTarget);
-    if (newRole === 'admin') {
-      const existing = await getDoc(adminDocRef);
-      if (!existing.exists()) {
-        await setDoc(adminDocRef, {
-          uid: safeTarget,
-          grantedBy: safeActor,
-          createdAt: serverTimestamp(),
+    return accountId;
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('已存在於授權名單')) {
+      throw err;
+    }
+    handleFirestoreError(err, OperationType.CREATE, `allowedAccounts/${accountId}`);
+  }
+}
+
+export async function adminUpdateAllowedAccount(
+  account: AllowedAccount,
+  updates: {
+    displayName: string;
+    department: string;
+    jobTitle: string;
+    role: StaffRole;
+    status: AccountStatus;
+  }
+): Promise<void> {
+  const isBootstrap = account.email.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
+  const nextRole: StaffRole = isBootstrap ? 'admin' : updates.role;
+  const nextStatus: AccountStatus = isBootstrap ? 'active' : updates.status;
+  const safeName = clampString(updates.displayName, 60, account.displayName);
+  const safeDept = clampString(updates.department, 60, account.department);
+  const safeTitle = clampString(updates.jobTitle, 60, account.jobTitle);
+
+  try {
+    await updateDoc(doc(db, 'allowedAccounts', account.id), {
+      displayName: safeName,
+      department: safeDept,
+      jobTitle: safeTitle,
+      role: nextRole,
+      status: nextStatus,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `allowedAccounts/${account.id}`);
+  }
+
+  // Mirror display/role updates to staffProfiles if the user has already signed in
+  if (account.uid) {
+    const safeUid = sanitizeId(account.uid, 'user');
+    try {
+      const profRef = doc(db, 'staffProfiles', safeUid);
+      const profSnap = await getDoc(profRef);
+      if (profSnap.exists()) {
+        await updateDoc(profRef, {
+          displayName: safeName,
+          department: safeDept,
+          jobTitle: safeTitle,
+          role: nextRole,
+          updatedAt: serverTimestamp(),
         });
       }
-    } else {
-      const existing = await getDoc(adminDocRef);
-      if (existing.exists()) {
-        await deleteDoc(adminDocRef);
-      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `staffProfiles/${safeUid}`);
     }
+  }
+}
+
+export async function adminToggleAllowedAccountStatus(account: AllowedAccount): Promise<AccountStatus> {
+  if (account.email.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase()) {
+    throw new Error('系統主管理者帳號不可停用');
+  }
+  const nextStatus: AccountStatus = account.status === 'active' ? 'disabled' : 'active';
+  try {
+    await updateDoc(doc(db, 'allowedAccounts', account.id), {
+      status: nextStatus,
+      updatedAt: serverTimestamp(),
+    });
+    return nextStatus;
   } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, `staffProfiles/${safeTarget}`);
+    handleFirestoreError(err, OperationType.UPDATE, `allowedAccounts/${account.id}`);
+  }
+}
+
+export async function adminDeleteAllowedAccount(account: AllowedAccount): Promise<void> {
+  if (account.email.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase()) {
+    throw new Error('系統主管理者帳號不可刪除');
+  }
+  try {
+    await deleteDoc(doc(db, 'allowedAccounts', account.id));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `allowedAccounts/${account.id}`);
   }
 }
 
@@ -532,6 +765,7 @@ export async function deleteIncidentReport(incidentId: string): Promise<void> {
 }
 
 export const collectionRefs = {
+  allowedAccounts: () => collection(db, 'allowedAccounts'),
   staffProfiles: () => collection(db, 'staffProfiles'),
   timetables: () => collection(db, 'timetables'),
   leaveRecords: () => collection(db, 'leaveRecords'),

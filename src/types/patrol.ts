@@ -3,7 +3,8 @@ import type { Timestamp } from 'firebase/firestore';
 export const CAMPUS_ID = 'main-campus' as const;
 export const BOOTSTRAP_ADMIN_EMAIL = 'mihsia@gmail.com';
 
-export type StaffRole = 'admin' | 'inspector' | 'viewer';
+export type StaffRole = 'admin' | 'user';
+export type AccountStatus = 'active' | 'disabled';
 export type PatrolStatus = 'normal' | 'minor_issue' | 'urgent_issue' | 'empty_relocated';
 export type LeaveType = 'sick' | 'personal' | 'official' | 'bereavement';
 export type ObservedAbsenceType = 'missing' | 'late' | 'left_early' | 'unauthorized_exit';
@@ -20,6 +21,21 @@ export type IncidentSeverity = 'low' | 'medium' | 'high';
 export type IncidentStatus = 'open' | 'in_progress' | 'resolved';
 
 export type NavSection = 'dashboard' | 'patrol' | 'incidents' | 'timetable' | 'reports' | 'staff';
+
+export interface AllowedAccount {
+  id: string;
+  campusId: typeof CAMPUS_ID;
+  email: string;
+  displayName: string;
+  department: string;
+  jobTitle: string;
+  role: StaffRole;
+  status: AccountStatus;
+  uid: string;
+  createdBy: string;
+  createdAt?: Timestamp | null;
+  updatedAt?: Timestamp | null;
+}
 
 export interface StaffProfile {
   uid: string;
@@ -226,10 +242,27 @@ export const INCIDENT_STATUS_LABELS: Record<IncidentStatus, string> = {
 };
 
 export const STAFF_ROLE_LABELS: Record<StaffRole, string> = {
-  admin: '系統管理員',
-  inspector: '巡堂人員',
-  viewer: '檢視人員',
+  admin: '管理者',
+  user: '使用者',
 };
+
+export const ACCOUNT_STATUS_LABELS: Record<AccountStatus, string> = {
+  active: '使用中',
+  disabled: '已停用',
+};
+
+export const DEFAULT_DEPARTMENTS = [
+  '校長室',
+  '教務處',
+  '學務處',
+  '總務處',
+  '輔導室',
+  '導師群',
+] as const;
+
+export function normalizeStaffRole(role: unknown): StaffRole {
+  return role === 'admin' ? 'admin' : 'user';
+}
 
 export function getTodayDateString(): string {
   const now = new Date();

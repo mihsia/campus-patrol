@@ -5,7 +5,7 @@ import {
   signOut,
   type User,
 } from 'firebase/auth';
-import { onSnapshot, query, where } from 'firebase/firestore';
+import { doc, onSnapshot, query, where } from 'firebase/firestore';
 import {
   AlertTriangle,
   Bell,
@@ -18,11 +18,15 @@ import {
   X,
 } from 'lucide-react';
 import {
+  BOOTSTRAP_ADMIN_EMAIL,
   CAMPUS_ID,
   detectCurrentPeriod,
   getTodayDateString,
   INCIDENT_SEVERITY_LABELS,
+  normalizeStaffRole,
+  STAFF_ROLE_LABELS,
   type AbsenceRecord,
+  type AllowedAccount,
   type IncidentReport,
   type LeaveRecord,
   type NavSection,
@@ -33,11 +37,13 @@ import {
 } from './types/patrol';
 import {
   auth,
+  db,
   googleProvider,
   handleFirestoreError,
   OperationType,
 } from './lib/firebase';
-import { collectionRefs, ensureUserAccountDocs } from './lib/firestoreOps';
+import { collectionRefs, verifyAndBootstrapGoogleUser } from './lib/firestoreOps';
+import { emailToAccountId } from './lib/validation';
 import { seedCampusDemoDataset } from './lib/seedData';
 import {
   loadNotificationPrefs,
@@ -47,7 +53,7 @@ import {
   triggerBrowserPushNotification,
 } from './lib/notifications';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { SignInScreen } from './components/SignInScreen';
+import { AccessBlockedScreen, SignInScreen } from './components/SignInScreen';
 import { DashboardView } from './components/DashboardView';
 import { PatrolWorkspaceView } from './components/PatrolWorkspaceView';
 import { IncidentsView } from './components/IncidentsView';
@@ -62,17 +68,17 @@ interface NavItemConfig {
   icon: React.ComponentType<{ className?: string }>;
 }
 
-const NAV_ITEMS: NavItemConfig[] = [
-  { id: 'dashboard', label: '即時巡堂儀表板', mobileLabel: '儀表板', icon: LayoutDashboard },
-  { id: 'patrol', label: '行動巡堂作業', mobileLabel: '巡堂', icon: ClipboardCheck },
-  { id: 'incidents', label: '異常事件通報', mobileLabel: '通報', icon: Bell },
-  { id: 'timetable', label: '課表與自動缺曠', mobileLabel: '缺曠', icon: BookOpen },
-  { id: 'reports', label: 'PDF／Excel 報表', mobileLabel: '報表', icon: FileSpreadsheet },
-  { id: 'staff', label: '帳號與人員管理', mobileLabel: '帳號', icon: Users },
-];
+type AccessState = 'loading' | 'signed_out' | 'authorized' | 'unauthorized' | 'disabled';
+
+interface BlockedInfo {
+  email: string;
+  displayName?: string;
+  department?: string;
+}
 
 function CampusPatrolApp() {
-  const [authReady, setAuthReady] = useState(false);
+  const [accessState, setAccessState] = useState<AccessState>('loading');
+  const [blockedInfo, setBlockedInfo] = useState<BlockedInfo | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<StaffProfile | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -93,6 +99,7 @@ function CampusPatrolApp() {
   const [absences, setAbsences] = useState<AbsenceRecord[]>([]);
   const [incidents, setIncidents] = useState<IncidentReport[]>([]);
   const [staffList, setStaffList] = useState<StaffProfile[]>([]);
+  const [allowedAccounts, setAllowedAccounts] = useState<AllowedAccount[]>([]);
 
   // Push Notification & Toast Feedback State
   const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences>(loadNotificationPrefs);
@@ -114,45 +121,150 @@ function CampusPatrolApp() {
     return () => window.clearTimeout(timer);
   }, [feedbackBanner]);
 
-  // 1. Auth Listener & Profile Bootstrap
+  const clearOperationalData = useCallback(() => {
+    setTimetables([]);
+    setLeaveRecords([]);
+    setPatrolLogs([]);
+    setAbsences([]);
+    setIncidents([]);
+    setStaffList([]);
+    setAllowedAccounts([]);
+    incidentsHydratedRef.current = false;
+  }, []);
+
+  // 1. Google-Only Auth Listener & Allowlist Verification
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
       if (!user) {
         setProfile(null);
         setIsAdmin(false);
-        setAuthReady(true);
-        incidentsHydratedRef.current = false;
+        setBlockedInfo(null);
+        clearOperationalData();
+        setAccessState('signed_out');
         return;
       }
 
-      if (!user.emailVerified) {
-        setAuthError('您的 Google 帳號 Email 尚未完成驗證，為維護校園資料安全，請先完成驗證後再登入。');
-        setAuthReady(true);
+      const isGoogleProvider = user.providerData.some((p) => p.providerId === 'google.com');
+      if (!isGoogleProvider || !user.emailVerified || !user.email) {
+        setAuthError('本系統僅開放已完成驗證的 Google 帳號登入，請改用 Google 帳號重新登入。');
+        setProfile(null);
+        setIsAdmin(false);
+        clearOperationalData();
+        setAccessState('signed_out');
         return;
       }
 
+      setAccessState('loading');
       try {
-        const { profile: resolvedProfile, isAdmin: adminFlag } = await ensureUserAccountDocs({
+        const result = await verifyAndBootstrapGoogleUser({
           uid: user.uid,
-          email: user.email || '',
+          email: user.email,
           displayName: user.displayName || '',
         });
-        setProfile(resolvedProfile);
-        setIsAdmin(adminFlag);
+
+        if (result.status === 'unauthorized') {
+          setProfile(null);
+          setIsAdmin(false);
+          clearOperationalData();
+          setBlockedInfo({ email: result.email });
+          setAccessState('unauthorized');
+          return;
+        }
+
+        if (result.status === 'disabled') {
+          setProfile(null);
+          setIsAdmin(false);
+          clearOperationalData();
+          setBlockedInfo({
+            email: result.email,
+            displayName: result.displayName,
+            department: result.department,
+          });
+          setAccessState('disabled');
+          return;
+        }
+
+        setProfile(result.profile);
+        setIsAdmin(result.isAdmin);
+        setBlockedInfo(null);
         setAuthError(null);
+        setAccessState('authorized');
       } catch (err) {
-        setAuthError(err instanceof Error ? err.message : '初始化個人巡堂檔案失敗');
-      } finally {
-        setAuthReady(true);
+        setAuthError(err instanceof Error ? err.message : '驗證 Google 授權帳號時發生錯誤');
+        setProfile(null);
+        setIsAdmin(false);
+        clearOperationalData();
+        setAccessState('signed_out');
       }
     });
     return () => unsub();
-  }, []);
+  }, [clearOperationalData]);
 
-  // 2. Real-time Firestore Listeners (strictly after auth is verified)
+  // 2. Live Watcher on Own AllowedAccount (Instant Revocation & Live Role Sync)
   useEffect(() => {
-    if (!authReady || !firebaseUser || !firebaseUser.emailVerified || !profile) {
+    if (!firebaseUser || !firebaseUser.email || !firebaseUser.emailVerified) {
+      return;
+    }
+    if (accessState !== 'authorized') {
+      return;
+    }
+
+    const myEmail = firebaseUser.email.toLowerCase();
+    const isBootstrap = myEmail === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
+    const myAccountId = emailToAccountId(myEmail);
+
+    const unsubSelfAccount = onSnapshot(
+      doc(db, 'allowedAccounts', myAccountId),
+      (snap) => {
+        if (!snap.exists()) {
+          if (!isBootstrap) {
+            setProfile(null);
+            setIsAdmin(false);
+            clearOperationalData();
+            setBlockedInfo({ email: myEmail });
+            setAccessState('unauthorized');
+          }
+          return;
+        }
+
+        const data = snap.data() as Omit<AllowedAccount, 'id'>;
+        if (!isBootstrap && data.status !== 'active') {
+          setProfile(null);
+          setIsAdmin(false);
+          clearOperationalData();
+          setBlockedInfo({
+            email: myEmail,
+            displayName: data.displayName,
+            department: data.department,
+          });
+          setAccessState('disabled');
+          return;
+        }
+
+        const nextRole = isBootstrap ? 'admin' : normalizeStaffRole(data.role);
+        setIsAdmin(nextRole === 'admin');
+        setProfile((prev) =>
+          prev
+            ? {
+                ...prev,
+                displayName: data.displayName || prev.displayName,
+                department: data.department || prev.department,
+                jobTitle: data.jobTitle || prev.jobTitle,
+                role: nextRole,
+              }
+            : prev
+        );
+      },
+      (error) => handleFirestoreError(error, OperationType.GET, `allowedAccounts/${myAccountId}`)
+    );
+
+    return () => unsubSelfAccount();
+  }, [firebaseUser, accessState, clearOperationalData]);
+
+  // 3. Real-time Operational Firestore Listeners (Strictly after Authorized)
+  useEffect(() => {
+    if (accessState !== 'authorized' || !firebaseUser || !profile) {
       return;
     }
 
@@ -212,7 +324,6 @@ function CampusPatrolApp() {
         }));
         setIncidents(list);
 
-        // Dispatch real-time push notification for newly added open incidents after initial hydration
         if (incidentsHydratedRef.current) {
           snap.docChanges().forEach((change) => {
             if (change.type === 'added') {
@@ -241,12 +352,11 @@ function CampusPatrolApp() {
     const unsubStaff = onSnapshot(
       qStaff,
       (snap) => {
-        const members = snap.docs.map((d) => d.data() as StaffProfile);
+        const members = snap.docs.map((d) => {
+          const data = d.data() as StaffProfile;
+          return { ...data, role: normalizeStaffRole(data.role) };
+        });
         setStaffList(members);
-        const me = members.find((m) => m.uid === firebaseUser.uid);
-        if (me) {
-          setProfile(me);
-        }
       },
       (error) => handleFirestoreError(error, OperationType.LIST, 'staffProfiles')
     );
@@ -259,7 +369,35 @@ function CampusPatrolApp() {
       unsubIncidents();
       unsubStaff();
     };
-  }, [authReady, firebaseUser, profile?.uid]);
+  }, [accessState, firebaseUser, profile?.uid]);
+
+  // 4. Admin-Only Live Listener for Authorized Google Accounts Directory
+  useEffect(() => {
+    if (accessState !== 'authorized' || !isAdmin) {
+      setAllowedAccounts([]);
+      return;
+    }
+
+    const qAccounts = query(collectionRefs.allowedAccounts(), where('campusId', '==', CAMPUS_ID));
+    const unsubAccounts = onSnapshot(
+      qAccounts,
+      (snap) => {
+        setAllowedAccounts(
+          snap.docs.map((d) => {
+            const raw = d.data() as Omit<AllowedAccount, 'id'>;
+            return {
+              id: d.id,
+              ...raw,
+              role: normalizeStaffRole(raw.role),
+            };
+          })
+        );
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'allowedAccounts')
+    );
+
+    return () => unsubAccounts();
+  }, [accessState, isAdmin]);
 
   const handleSignIn = async () => {
     setSigningIn(true);
@@ -280,8 +418,13 @@ function CampusPatrolApp() {
     await signOut(auth);
   };
 
+  const handleSwitchAccount = async () => {
+    await signOut(auth);
+    await handleSignIn();
+  };
+
   const handleSeedDemoData = async () => {
-    if (!profile) return;
+    if (!profile || !isAdmin) return;
     setSeeding(true);
     try {
       const res = await seedCampusDemoDataset({
@@ -302,6 +445,23 @@ function CampusPatrolApp() {
     saveNotificationPrefs(next);
   };
 
+  const navItems: NavItemConfig[] = useMemo(
+    () => [
+      { id: 'dashboard', label: '即時巡堂儀表板', mobileLabel: '儀表板', icon: LayoutDashboard },
+      { id: 'patrol', label: '行動巡堂作業', mobileLabel: '巡堂', icon: ClipboardCheck },
+      { id: 'incidents', label: '異常事件通報', mobileLabel: '通報', icon: Bell },
+      { id: 'timetable', label: '課表與自動缺曠', mobileLabel: '缺曠', icon: BookOpen },
+      { id: 'reports', label: 'PDF／Excel 報表', mobileLabel: '報表', icon: FileSpreadsheet },
+      {
+        id: 'staff',
+        label: isAdmin ? '帳號權限管理' : '個人帳號',
+        mobileLabel: '帳號',
+        icon: Users,
+      },
+    ],
+    [isAdmin]
+  );
+
   const openHighIncidentCount = useMemo(
     () => incidents.filter((i) => i.status !== 'resolved' && i.severity === 'high').length,
     [incidents]
@@ -312,18 +472,31 @@ function CampusPatrolApp() {
     [incidents]
   );
 
-  if (!authReady) {
+  if (accessState === 'loading') {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
         <div className="text-center space-y-2">
           <div className="w-8 h-8 border-2 border-teal-700 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-sm text-slate-600">正在連線校園巡堂資料庫...</p>
+          <p className="text-sm text-slate-600">正在驗證 Google 授權帳號與校園資料庫...</p>
         </div>
       </div>
     );
   }
 
-  if (!firebaseUser || !profile) {
+  if (accessState === 'unauthorized' || accessState === 'disabled') {
+    return (
+      <AccessBlockedScreen
+        reason={accessState}
+        email={blockedInfo?.email || firebaseUser?.email || ''}
+        displayName={blockedInfo?.displayName}
+        department={blockedInfo?.department}
+        onSignOut={handleSignOut}
+        onSwitchAccount={handleSwitchAccount}
+      />
+    );
+  }
+
+  if (accessState === 'signed_out' || !firebaseUser || !profile) {
     return (
       <SignInScreen
         onSignIn={handleSignIn}
@@ -333,7 +506,7 @@ function CampusPatrolApp() {
     );
   }
 
-  const currentNavMeta = NAV_ITEMS.find((n) => n.id === activeNav) ?? NAV_ITEMS[0];
+  const currentNavMeta = navItems.find((n) => n.id === activeNav) ?? navItems[0];
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col lg:flex-row">
@@ -346,7 +519,7 @@ function CampusPatrolApp() {
         </div>
 
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const Icon = item.icon;
             const active = activeNav === item.id;
             return (
@@ -379,8 +552,17 @@ function CampusPatrolApp() {
         </nav>
 
         <div className="p-4 border-t border-slate-200 space-y-3">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-slate-900 truncate">{profile.displayName}</p>
+          <div className="min-w-0 space-y-0.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-slate-900 truncate">{profile.displayName}</p>
+              <span
+                className={`text-xs font-semibold shrink-0 ${
+                  isAdmin ? 'text-teal-800' : 'text-slate-500'
+                }`}
+              >
+                {STAFF_ROLE_LABELS[isAdmin ? 'admin' : 'user']}
+              </span>
+            </div>
             <p className="text-xs text-slate-500 truncate">
               {profile.department} · {profile.jobTitle}
             </p>
@@ -509,6 +691,7 @@ function CampusPatrolApp() {
               onNavigate={setActiveNav}
               onSeedDemoData={handleSeedDemoData}
               seeding={seeding}
+              isAdmin={isAdmin}
             />
           )}
 
@@ -573,6 +756,7 @@ function CampusPatrolApp() {
               profile={profile}
               userEmail={firebaseUser.email || ''}
               isAdmin={isAdmin}
+              allowedAccounts={allowedAccounts}
               staffList={staffList}
               onActionFeedback={showFeedback}
             />
@@ -586,7 +770,7 @@ function CampusPatrolApp() {
         className="no-print lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe"
       >
         <div className="grid grid-cols-6 h-14">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const Icon = item.icon;
             const active = activeNav === item.id;
             return (

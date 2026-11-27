@@ -1,6 +1,20 @@
 // Synchronized verbatim with firebase-blueprint.json maxLength and pattern constraints
 export const ID_REGEX = /^[a-zA-Z0-9_-]+$/;
 export const DATE_REGEX = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
+export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function normalizeEmail(raw: string): string {
+  return raw.trim().toLowerCase().slice(0, 120);
+}
+
+export function isValidEmailFormat(email: string): boolean {
+  const normalized = normalizeEmail(email);
+  return normalized.length >= 3 && normalized.length <= 120 && EMAIL_REGEX.test(normalized);
+}
+
+export function emailToAccountId(email: string): string {
+  return normalizeEmail(email).replace(/[^a-z0-9]/g, '_');
+}
 
 export function sanitizeId(raw: string, fallbackPrefix = 'rec'): string {
   const cleaned = raw.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');

@@ -1,29 +1,25 @@
-# CampusPatrol Firestore Security Specification (Phase 0 TDD)
+# CampusPatrol Security Specification (Two-Tier Google-Only RBAC)
 
 ## 1. Data Invariants
-
-1. **Verified Identity Gate**: Every read and write operation requires `request.auth != null && request.auth.token.email_verified == true`. Unverified emails (including spoofed admin emails) are unconditionally rejected.
-2. **PII Isolation**: User email addresses are stored exclusively in `/userPrivate/{userId}`, readable and writable only by the owner (`request.auth.uid == userId`) or an administrator (`isAdmin()`). Public `/staffProfiles/{userId}` documents contain zero PII.
-3. **No Self-Assigned Privileges**: Non-admin users creating `/staffProfiles/{userId}` may only register with `role == 'inspector'` and can never mutate `role` during updates. Only admins can write to `/admins/{userId}` or change a user's `role`.
-4. **Relational Integrity (Anti-Orphan)**: Every `/patrolLogs/{logId}` and `/absences/{absenceId}` document must reference an existing `/timetables/{timetableId}` document verified via `exists()` at creation time. Every `/incidents/{incidentId}` with a non-empty `timetableId` must also verify `exists()`.
-5. **Temporal Integrity & Immutability**: `createdAt` must equal `request.time` on creation and remain immutable on update. `updatedAt` must equal `request.time` on update. Creator/owner identity fields (`uid`, `createdBy`, `inspectorId`, `recordedBy`, `reporterId`) are immutable after creation.
-6. **Terminal State Locking**: Once an `/incidents/{incidentId}` document reaches `status == 'resolved'`, non-admin users cannot modify it further. Admins retain an explicit override gate.
-7. **Action-Based Updates & Strict Keys**: Every write passes a dedicated `isValid[Entity]()` schema blueprint enforcing `hasAll`/`hasOnly`, strict types, string `.size()` caps, bounded array sizes, and regex ID guards (`^[a-zA-Z0-9_\-]+$`). Every update uses `affectedKeys().hasOnly(...)`.
-8. **Secure List Queries**: No blanket `allow list: if isSignedIn();`. Every `allow list` validates `resource.data` directly (`resource.data.campusId == 'main-campus'` for shared campus data; `resource.data.uid == request.auth.uid` for private records) with zero `get()`/`exists()` inside `allow list`.
+1. **Google-Only Verified Identity**: Every read or write requires `request.auth != null`, `request.auth.token.email_verified == true`, and `request.auth.token.firebase.sign_in_provider == 'google.com'`.
+2. **Active Allowlist Enforcement (`allowedAccounts`)**: Only the bootstrapped admin (`mihsia@gmail.com`) or Google accounts explicitly registered in `/allowedAccounts/{emailKey}` with `status == 'active'` and exact lowercase `email` match may access operational school collections (`staffProfiles`, `timetables`, `leaveRecords`, `patrolLogs`, `absences`, `incidents`).
+3. **Instant Revocation**: Setting `allowedAccounts/{emailKey}.status = 'disabled'` immediately revokes both `isAuthorizedAccount()` and `isAdmin()` synchronously at the Firestore Rules layer.
+4. **Two-Tier Role Integrity (`admin` | `user`)**: Only `admin` may create/edit/disable/delete `/allowedAccounts`, write/delete `/timetables`, delete `/incidents`, or override resolved incidents. Regular `user` accounts can never escalate `role` or `status`.
+5. **Bootstrap Admin Protection**: `mihsia@gmail.com` can never be demoted, disabled, or deleted.
+6. **PII Isolation**: `/allowedAccounts` (containing staff emails) and `/userPrivate` are strictly restricted: regular users may `get` ONLY their own document and can NEVER `list` other users' emails. Only `admin` may list `/allowedAccounts`.
+7. **Anti-Orphan Relational Checks**: Creating `patrolLogs` or `absences` requires `exists(/databases/$(database)/documents/timetables/$(incoming().timetableId))`.
+8. **Terminal State Lock**: Resolved incidents (`status == 'resolved'`) cannot be modified by non-admins.
 
 ## 2. The "Dirty Dozen" Adversarial Payloads
-
-| # | Attack Vector | Collection | Malicious Payload / Context | Expected Result |
-|---|---------------|------------|-----------------------------|-----------------|
-| 1 | Unverified Admin Email Spoof | `/admins/attacker` | `email: 'mihsia@gmail.com', email_verified: false` | `PERMISSION_DENIED` |
-| 2 | Self-Assigned Admin Role | `/staffProfiles/userA` | `{ role: 'admin', ... }` created by non-admin `userA` | `PERMISSION_DENIED` |
-| 3 | Role Escalation via Update | `/staffProfiles/userA` | `userA` updates own profile `{ role: 'admin', updatedAt: serverTimestamp() }` | `PERMISSION_DENIED` |
-| 4 | Cross-User PII Read | `/userPrivate/userB` | `userA` attempts `get` on `userB`'s private email doc | `PERMISSION_DENIED` |
-| 5 | Ghost / Shadow Field Injection | `/patrolLogs/log-1` | Valid patrol log plus extra `{ isVerifiedByPrincipal: true }` | `PERMISSION_DENIED` |
-| 6 | Client Timestamp Backdating | `/patrolLogs/log-2` | `{ createdAt: Timestamp(2020-01-01), ... }` | `PERMISSION_DENIED` |
-| 7 | Orphaned Patrol Log | `/patrolLogs/log-3` | `{ timetableId: 'nonexistent-slot-999', ... }` | `PERMISSION_DENIED` |
-| 8 | Path ID Poisoning | `/timetables/bad id!@#...` | Document ID containing spaces/symbols or >128 chars | `PERMISSION_DENIED` |
-| 9 | Identity Spoofing | `/incidents/inc-1` | `userA` creates incident with `reporterId: 'userB'` | `PERMISSION_DENIED` |
-| 10 | Terminal State Tampering | `/incidents/inc-resolved` | Non-admin updates an already `resolved` incident back to `open` | `PERMISSION_DENIED` |
-| 11 | Value Poisoning (Oversized String) | `/incidents/inc-2` | Updating `resolutionNote` with a 50,000-character string | `PERMISSION_DENIED` |
-| 12 | Unbounded Roster Array DoS | `/timetables/tt-1` | Creating timetable slot with 200 items in `roster` array (>60 limit) | `PERMISSION_DENIED` |
+1. **Unverified / Non-Google Provider Spoof**: Authenticated user with `sign_in_provider: 'password'` or `email_verified: false` attempts to read `timetables` -> `PERMISSION_DENIED`.
+2. **Unauthorized Stranger Google Login**: Verified Google account `stranger@gmail.com` (not in `allowedAccounts`) attempts to read `patrolLogs` or create `staffProfiles` -> `PERMISSION_DENIED`.
+3. **Disabled Account Write**: Previously authorized account whose `allowedAccounts` doc has `status: 'disabled'` attempts to log a patrol -> `PERMISSION_DENIED`.
+4. **Self-Role Escalation on AllowedAccount**: Active `user` attempts to update own `allowedAccounts/{emailKey}` with `{ role: 'admin' }` -> `PERMISSION_DENIED`.
+5. **Self-Status Reactivation**: Disabled user attempts to update own `allowedAccounts/{emailKey}` with `{ status: 'active' }` -> `PERMISSION_DENIED`.
+6. **PII Directory Scraping**: Regular `user` attempts `list` on `/allowedAccounts` or `get` on another user's `/allowedAccounts/{otherKey}` -> `PERMISSION_DENIED`.
+7. **Shadow Ghost Field Injection**: Admin or user sends `{ ..., isSuperAdmin: true }` when creating/updating `allowedAccounts` -> `PERMISSION_DENIED`.
+8. **Regular User Timetable Tampering**: Active `user` (non-admin) attempts to create or delete a `/timetables/{id}` slot -> `PERMISSION_DENIED`.
+9. **Bootstrap Admin Lockout Attack**: Another admin attempts to disable or delete `allowedAccounts/mihsia_gmail_com` -> `PERMISSION_DENIED`.
+10. **Path ID Poisoning**: Creating `/allowedAccounts/bad!email@id` or mismatched key vs email -> `PERMISSION_DENIED`.
+11. **Orphaned Patrol Log**: Creating `/patrolLogs/{id}` referencing nonexistent `timetableId` -> `PERMISSION_DENIED`.
+12. **Resolved Incident Reopen by Non-Admin**: Active `user` attempts to mutate `incidents/{id}` after `status == 'resolved'` -> `PERMISSION_DENIED`.

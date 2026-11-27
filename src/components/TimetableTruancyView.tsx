@@ -474,30 +474,34 @@ export const TimetableTruancyView: React.FC<TimetableTruancyViewProps> = ({
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <input
-                  ref={csvInputRef}
-                  type="file"
-                  accept=".csv,text/csv"
-                  onChange={handleCsvUpload}
-                  className="hidden"
-                />
-                <button
-                  type="button"
-                  onClick={() => csvInputRef.current?.click()}
-                  disabled={importingCsv}
-                  className="min-h-[40px] px-3.5 py-2 bg-teal-700 hover:bg-teal-800 text-white text-xs font-medium rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
-                >
-                  <FileUp className="w-4 h-4" />
-                  {importingCsv ? '匯入解析中...' : '上傳學校 CSV 課表'}
-                </button>
-                <button
-                  type="button"
-                  onClick={downloadTimetableCsvTemplate}
-                  className="min-h-[40px] px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-medium rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
-                >
-                  <Download className="w-4 h-4" />
-                  下載匯入範本
-                </button>
+                {isAdmin && (
+                  <>
+                    <input
+                      ref={csvInputRef}
+                      type="file"
+                      accept=".csv,text/csv"
+                      onChange={handleCsvUpload}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => csvInputRef.current?.click()}
+                      disabled={importingCsv}
+                      className="min-h-[40px] px-3.5 py-2 bg-teal-700 hover:bg-teal-800 text-white text-xs font-medium rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                    >
+                      <FileUp className="w-4 h-4" />
+                      {importingCsv ? '匯入解析中...' : '上傳學校 CSV 課表'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={downloadTimetableCsvTemplate}
+                      className="min-h-[40px] px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-medium rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                    >
+                      <Download className="w-4 h-4" />
+                      下載匯入範本
+                    </button>
+                  </>
+                )}
                 {timetables.length > 0 && (
                   <button
                     type="button"
@@ -507,15 +511,17 @@ export const TimetableTruancyView: React.FC<TimetableTruancyViewProps> = ({
                     備份課表 CSV
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => setShowAddSlotModal(true)}
-                  className="min-h-[40px] px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" />
-                  新增單節課表
-                </button>
-                {timetables.length === 0 && (
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAddSlotModal(true)}
+                    className="min-h-[40px] px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    新增單節課表
+                  </button>
+                )}
+                {isAdmin && timetables.length === 0 && (
                   <button
                     type="button"
                     onClick={onSeedDemoData}
@@ -525,6 +531,9 @@ export const TimetableTruancyView: React.FC<TimetableTruancyViewProps> = ({
                     <Database className="w-4 h-4" />
                     {seeding ? '建立中...' : '載入範例課表'}
                   </button>
+                )}
+                {!isAdmin && (
+                  <span className="text-xs text-slate-500">課表匯入與刪除限管理者操作</span>
                 )}
               </div>
             </div>
@@ -590,7 +599,7 @@ export const TimetableTruancyView: React.FC<TimetableTruancyViewProps> = ({
                         )}
                       </td>
                       <td className="py-2.5 px-4 text-right">
-                        {(isAdmin || slot.createdBy === profile.uid) && (
+                        {isAdmin && (
                           <button
                             type="button"
                             onClick={async () => {
