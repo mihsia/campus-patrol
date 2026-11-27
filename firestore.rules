@@ -1,0 +1,465 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 0: Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Reusable Global Primitives ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'mihsia@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidDateStr(d) {
+      return d is string && d.size() == 10 && d.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Validation Blueprints (Anti-Update-Gap) ---
+
+    function isValidAdminRecord(data, userId) {
+      return data.keys().hasAll(['uid', 'grantedBy', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'grantedBy', 'createdAt']) &&
+        isValidId(data.uid) &&
+        data.uid == userId &&
+        data.grantedBy is string && data.grantedBy.size() >= 1 && data.grantedBy.size() <= 128 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidStaffProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'campusId', 'displayName', 'department', 'jobTitle', 'role', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'campusId', 'displayName', 'department', 'jobTitle', 'role', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.uid == userId &&
+        data.campusId == 'main-campus' &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+        data.department is string && data.department.size() >= 1 && data.department.size() <= 60 &&
+        data.jobTitle is string && data.jobTitle.size() >= 1 && data.jobTitle.size() <= 60 &&
+        data.role in ['admin', 'inspector', 'viewer'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUserPrivate(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.uid == userId &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 120 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidTimetable(data) {
+      return data.keys().hasAll([
+          'campusId', 'dayOfWeek', 'period', 'building', 'floor', 'roomNumber',
+          'className', 'grade', 'subject', 'teacherName', 'expectedCount',
+          'isRelocated', 'locationNote', 'roster', 'createdBy', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'campusId', 'dayOfWeek', 'period', 'building', 'floor', 'roomNumber',
+          'className', 'grade', 'subject', 'teacherName', 'expectedCount',
+          'isRelocated', 'locationNote', 'roster', 'createdBy', 'createdAt', 'updatedAt'
+        ]) &&
+        data.campusId == 'main-campus' &&
+        data.dayOfWeek is int && data.dayOfWeek >= 1 && data.dayOfWeek <= 5 &&
+        data.period is int && data.period >= 1 && data.period <= 8 &&
+        data.building is string && data.building.size() >= 1 && data.building.size() <= 40 &&
+        data.floor is string && data.floor.size() >= 1 && data.floor.size() <= 20 &&
+        data.roomNumber is string && data.roomNumber.size() >= 1 && data.roomNumber.size() <= 20 &&
+        data.className is string && data.className.size() >= 1 && data.className.size() <= 30 &&
+        data.grade is string && data.grade.size() >= 1 && data.grade.size() <= 20 &&
+        data.subject is string && data.subject.size() >= 1 && data.subject.size() <= 50 &&
+        data.teacherName is string && data.teacherName.size() >= 1 && data.teacherName.size() <= 40 &&
+        data.expectedCount is int && data.expectedCount >= 1 && data.expectedCount <= 120 &&
+        data.isRelocated is bool &&
+        data.locationNote is string && data.locationNote.size() <= 100 &&
+        data.roster is list && data.roster.size() <= 60 &&
+        (data.roster.size() == 0 || (data.roster[0] is string && data.roster[0].size() >= 1 && data.roster[0].size() <= 60)) &&
+        data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidLeaveRecord(data) {
+      return data.keys().hasAll([
+          'campusId', 'date', 'className', 'seatNumber', 'studentName',
+          'leaveType', 'periods', 'reason', 'approvedBy', 'createdBy', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'campusId', 'date', 'className', 'seatNumber', 'studentName',
+          'leaveType', 'periods', 'reason', 'approvedBy', 'createdBy', 'createdAt', 'updatedAt'
+        ]) &&
+        data.campusId == 'main-campus' &&
+        isValidDateStr(data.date) &&
+        data.className is string && data.className.size() >= 1 && data.className.size() <= 30 &&
+        data.seatNumber is string && data.seatNumber.size() >= 1 && data.seatNumber.size() <= 10 &&
+        data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 40 &&
+        data.leaveType in ['sick', 'personal', 'official', 'bereavement'] &&
+        data.periods is list && data.periods.size() >= 1 && data.periods.size() <= 8 &&
+        data.periods[0] is int && data.periods[0] >= 1 && data.periods[0] <= 8 &&
+        data.reason is string && data.reason.size() <= 200 &&
+        data.approvedBy is string && data.approvedBy.size() >= 1 && data.approvedBy.size() <= 60 &&
+        data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidPatrolLog(data) {
+      return data.keys().hasAll([
+          'campusId', 'date', 'dayOfWeek', 'period', 'timetableId',
+          'building', 'roomNumber', 'className', 'subject', 'teacherName',
+          'teacherPresent', 'expectedCount', 'actualCount', 'status', 'note',
+          'inspectorId', 'inspectorName', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'campusId', 'date', 'dayOfWeek', 'period', 'timetableId',
+          'building', 'roomNumber', 'className', 'subject', 'teacherName',
+          'teacherPresent', 'expectedCount', 'actualCount', 'status', 'note',
+          'inspectorId', 'inspectorName', 'createdAt', 'updatedAt'
+        ]) &&
+        data.campusId == 'main-campus' &&
+        isValidDateStr(data.date) &&
+        data.dayOfWeek is int && data.dayOfWeek >= 1 && data.dayOfWeek <= 5 &&
+        data.period is int && data.period >= 1 && data.period <= 8 &&
+        isValidId(data.timetableId) &&
+        data.building is string && data.building.size() >= 1 && data.building.size() <= 40 &&
+        data.roomNumber is string && data.roomNumber.size() >= 1 && data.roomNumber.size() <= 20 &&
+        data.className is string && data.className.size() >= 1 && data.className.size() <= 30 &&
+        data.subject is string && data.subject.size() >= 1 && data.subject.size() <= 50 &&
+        data.teacherName is string && data.teacherName.size() >= 1 && data.teacherName.size() <= 40 &&
+        data.teacherPresent is bool &&
+        data.expectedCount is int && data.expectedCount >= 0 && data.expectedCount <= 120 &&
+        data.actualCount is int && data.actualCount >= 0 && data.actualCount <= 120 &&
+        data.status in ['normal', 'minor_issue', 'urgent_issue', 'empty_relocated'] &&
+        data.note is string && data.note.size() <= 500 &&
+        data.inspectorId is string && data.inspectorId.size() >= 1 && data.inspectorId.size() <= 128 &&
+        data.inspectorName is string && data.inspectorName.size() >= 1 && data.inspectorName.size() <= 60 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAbsenceRecord(data) {
+      return data.keys().hasAll([
+          'campusId', 'date', 'period', 'timetableId', 'className', 'subject', 'teacherName',
+          'seatNumber', 'studentName', 'observedType', 'autoStatus', 'riskLevel',
+          'verified', 'note', 'recordedBy', 'recordedByName', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'campusId', 'date', 'period', 'timetableId', 'className', 'subject', 'teacherName',
+          'seatNumber', 'studentName', 'observedType', 'autoStatus', 'riskLevel',
+          'verified', 'note', 'recordedBy', 'recordedByName', 'createdAt', 'updatedAt'
+        ]) &&
+        data.campusId == 'main-campus' &&
+        isValidDateStr(data.date) &&
+        data.period is int && data.period >= 1 && data.period <= 8 &&
+        isValidId(data.timetableId) &&
+        data.className is string && data.className.size() >= 1 && data.className.size() <= 30 &&
+        data.subject is string && data.subject.size() >= 1 && data.subject.size() <= 50 &&
+        data.teacherName is string && data.teacherName.size() >= 1 && data.teacherName.size() <= 40 &&
+        data.seatNumber is string && data.seatNumber.size() >= 1 && data.seatNumber.size() <= 10 &&
+        data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 40 &&
+        data.observedType in ['missing', 'late', 'left_early', 'unauthorized_exit'] &&
+        data.autoStatus in ['truant', 'late', 'left_early', 'excused_leave', 'pending_review'] &&
+        data.riskLevel in ['low', 'medium', 'high'] &&
+        data.verified is bool &&
+        data.note is string && data.note.size() <= 300 &&
+        data.recordedBy is string && data.recordedBy.size() >= 1 && data.recordedBy.size() <= 128 &&
+        data.recordedByName is string && data.recordedByName.size() >= 1 && data.recordedByName.size() <= 60 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidIncident(data) {
+      return data.keys().hasAll([
+          'campusId', 'date', 'period', 'timetableId', 'location', 'className',
+          'category', 'severity', 'title', 'description', 'status',
+          'reporterId', 'reporterName', 'handlerId', 'handlerName', 'resolutionNote',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'campusId', 'date', 'period', 'timetableId', 'location', 'className',
+          'category', 'severity', 'title', 'description', 'status',
+          'reporterId', 'reporterName', 'handlerId', 'handlerName', 'resolutionNote',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.campusId == 'main-campus' &&
+        isValidDateStr(data.date) &&
+        data.period is int && data.period >= 1 && data.period <= 8 &&
+        data.timetableId is string && data.timetableId.size() <= 128 &&
+        (data.timetableId == '' || isValidId(data.timetableId)) &&
+        data.location is string && data.location.size() >= 1 && data.location.size() <= 80 &&
+        data.className is string && data.className.size() <= 30 &&
+        data.category in ['teacher_absent', 'classroom_order', 'student_truancy', 'facility_issue', 'safety_medical', 'other'] &&
+        data.severity in ['low', 'medium', 'high'] &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+        data.description is string && data.description.size() >= 1 && data.description.size() <= 1000 &&
+        data.status in ['open', 'in_progress', 'resolved'] &&
+        data.reporterId is string && data.reporterId.size() >= 1 && data.reporterId.size() <= 128 &&
+        data.reporterName is string && data.reporterName.size() >= 1 && data.reporterName.size() <= 60 &&
+        data.handlerId is string && data.handlerId.size() <= 128 &&
+        data.handlerName is string && data.handlerName.size() <= 60 &&
+        data.resolutionNote is string && data.resolutionNote.size() <= 1000 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+
+    // 1. Admins Registry
+    match /admins/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if false;
+      allow create: if isVerifiedUser() &&
+        isValidId(userId) &&
+        isValidAdminRecord(incoming(), userId) &&
+        incoming().grantedBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        isAdmin();
+      allow update: if false;
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    // 2. Staff Profiles (Non-PII Public Directory)
+    match /staffProfiles/{userId} {
+      allow get: if isValidId(userId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && resource.data.campusId == 'main-campus';
+      allow create: if isVerifiedUser() &&
+        isValidId(userId) &&
+        isValidStaffProfile(incoming(), userId) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        request.auth.uid == userId &&
+        (incoming().role == 'inspector' || (incoming().role == 'admin' && isAdmin()));
+      allow update: if isVerifiedUser() &&
+        isValidId(userId) &&
+        isValidStaffProfile(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        incoming().campusId == existing().campusId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action: Admin role & profile management
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'department', 'jobTitle', 'role', 'updatedAt'])) ||
+          // Action: Self profile edit (role strictly immutable)
+          (isOwner(userId) &&
+            incoming().role == existing().role &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'department', 'jobTitle', 'updatedAt']))
+        );
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    // 3. Isolated User PII (Owner & Admin Only)
+    match /userPrivate/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if false;
+      allow create: if isVerifiedUser() &&
+        isValidId(userId) &&
+        isValidUserPrivate(incoming(), userId) &&
+        incoming().updatedAt == request.time &&
+        isOwner(userId);
+      allow update: if isVerifiedUser() &&
+        isValidId(userId) &&
+        isValidUserPrivate(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        incoming().updatedAt == request.time && (
+          (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'updatedAt'])) ||
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'updatedAt']))
+        );
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    // 4. School Timetables
+    match /timetables/{timetableId} {
+      allow get: if isValidId(timetableId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && resource.data.campusId == 'main-campus';
+      allow create: if isVerifiedUser() &&
+        isValidId(timetableId) &&
+        isValidTimetable(incoming()) &&
+        incoming().createdBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(timetableId) &&
+        isValidTimetable(incoming()) &&
+        incoming().campusId == existing().campusId &&
+        incoming().createdBy == existing().createdBy &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action: Edit timetable slot details & roster
+          (incoming().diff(existing()).affectedKeys().hasOnly([
+            'dayOfWeek', 'period', 'building', 'floor', 'roomNumber',
+            'className', 'grade', 'subject', 'teacherName', 'expectedCount',
+            'isRelocated', 'locationNote', 'roster', 'updatedAt'
+          ]) && (existing().createdBy == request.auth.uid || isAdmin()))
+        );
+      allow delete: if isValidId(timetableId) && (existing().createdBy == request.auth.uid || isAdmin());
+    }
+
+    // 5. Approved Student Leave Records
+    match /leaveRecords/{leaveId} {
+      allow get: if isValidId(leaveId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && resource.data.campusId == 'main-campus';
+      allow create: if isVerifiedUser() &&
+        isValidId(leaveId) &&
+        isValidLeaveRecord(incoming()) &&
+        incoming().createdBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(leaveId) &&
+        isValidLeaveRecord(incoming()) &&
+        incoming().campusId == existing().campusId &&
+        incoming().createdBy == existing().createdBy &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action: Update leave details
+          (incoming().diff(existing()).affectedKeys().hasOnly([
+            'leaveType', 'periods', 'reason', 'approvedBy', 'updatedAt'
+          ]) && (existing().createdBy == request.auth.uid || isAdmin()))
+        );
+      allow delete: if isValidId(leaveId) && (existing().createdBy == request.auth.uid || isAdmin());
+    }
+
+    // 6. Classroom Patrol Logs (Linked to Timetable via exists())
+    match /patrolLogs/{logId} {
+      allow get: if isValidId(logId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && resource.data.campusId == 'main-campus';
+      allow create: if isVerifiedUser() &&
+        isValidId(logId) &&
+        isValidPatrolLog(incoming()) &&
+        incoming().inspectorId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/timetables/$(incoming().timetableId));
+      allow update: if isVerifiedUser() &&
+        isValidId(logId) &&
+        isValidPatrolLog(incoming()) &&
+        incoming().campusId == existing().campusId &&
+        incoming().date == existing().date &&
+        incoming().timetableId == existing().timetableId &&
+        incoming().inspectorId == existing().inspectorId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action: Inspector updates their patrol observation
+          (existing().inspectorId == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'teacherPresent', 'actualCount', 'status', 'note', 'updatedAt'
+            ])) ||
+          // Action: Admin correction
+          (isAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'teacherPresent', 'actualCount', 'status', 'note', 'inspectorName', 'updatedAt'
+            ]))
+        );
+      allow delete: if isValidId(logId) && (existing().inspectorId == request.auth.uid || isAdmin());
+    }
+
+    // 7. Student Absence & Automated Truancy Records (Linked to Timetable via exists())
+    match /absences/{absenceId} {
+      allow get: if isValidId(absenceId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && resource.data.campusId == 'main-campus';
+      allow create: if isVerifiedUser() &&
+        isValidId(absenceId) &&
+        isValidAbsenceRecord(incoming()) &&
+        incoming().recordedBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/timetables/$(incoming().timetableId));
+      allow update: if isVerifiedUser() &&
+        isValidId(absenceId) &&
+        isValidAbsenceRecord(incoming()) &&
+        incoming().campusId == existing().campusId &&
+        incoming().date == existing().date &&
+        incoming().timetableId == existing().timetableId &&
+        incoming().recordedBy == existing().recordedBy &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action: Automated verification / leave reconciliation by staff
+          (incoming().diff(existing()).affectedKeys().hasOnly([
+            'observedType', 'autoStatus', 'riskLevel', 'verified', 'note', 'updatedAt'
+          ])) ||
+          // Action: Admin override
+          (isAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'observedType', 'autoStatus', 'riskLevel', 'verified', 'note', 'seatNumber', 'studentName', 'updatedAt'
+            ]))
+        );
+      allow delete: if isValidId(absenceId) && (existing().recordedBy == request.auth.uid || isAdmin());
+    }
+
+    // 8. Abnormal Incident Reports (Terminal State Locked at 'resolved')
+    match /incidents/{incidentId} {
+      allow get: if isValidId(incidentId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && resource.data.campusId == 'main-campus';
+      allow create: if isVerifiedUser() &&
+        isValidId(incidentId) &&
+        isValidIncident(incoming()) &&
+        incoming().reporterId == request.auth.uid &&
+        incoming().status == 'open' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (incoming().timetableId == '' || exists(/databases/$(database)/documents/timetables/$(incoming().timetableId)));
+      allow update: if isVerifiedUser() &&
+        isValidId(incidentId) &&
+        isValidIncident(incoming()) &&
+        incoming().campusId == existing().campusId &&
+        incoming().date == existing().date &&
+        incoming().timetableId == existing().timetableId &&
+        incoming().reporterId == existing().reporterId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action: Claim / start handling an open incident (non-terminal)
+          (existing().status == 'open' &&
+            incoming().status == 'in_progress' &&
+            incoming().handlerId == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'handlerId', 'handlerName', 'resolutionNote', 'updatedAt'])) ||
+          // Action: Update handler progress note while in_progress (non-terminal)
+          (existing().status == 'in_progress' &&
+            incoming().status == 'in_progress' &&
+            incoming().handlerId == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['handlerId', 'handlerName', 'resolutionNote', 'updatedAt'])) ||
+          // Action: Resolve an open or in_progress incident (entering terminal state)
+          (existing().status in ['open', 'in_progress'] &&
+            incoming().status == 'resolved' &&
+            incoming().handlerId == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'handlerId', 'handlerName', 'resolutionNote', 'updatedAt'])) ||
+          // Action: Reporter adds detail while still non-terminal
+          (existing().status in ['open', 'in_progress'] &&
+            existing().reporterId == request.auth.uid &&
+            incoming().status == existing().status &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'severity', 'updatedAt'])) ||
+          // Action: Admin override (including reopening or correcting resolved records)
+          (isAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'severity', 'title', 'description', 'handlerId', 'handlerName', 'resolutionNote', 'updatedAt']))
+        );
+      allow delete: if isValidId(incidentId) && isAdmin();
+    }
+  }
+}

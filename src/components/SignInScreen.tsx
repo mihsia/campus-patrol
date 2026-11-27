@@ -1,0 +1,120 @@
+import React, { useState } from 'react';
+import { BellRing, ClipboardCheck, FileSpreadsheet, ShieldCheck, Smartphone } from 'lucide-react';
+
+interface SignInScreenProps {
+  onSignIn: () => Promise<void>;
+  signingIn: boolean;
+  errorMessage: string | null;
+}
+
+const HERO_IMAGE_PATH = '/src/assets/images/campus_corridor_hero_1795748402611.jpg';
+
+export const SignInScreen: React.FC<SignInScreenProps> = ({
+  onSignIn,
+  signingIn,
+  errorMessage,
+}) => {
+  const [imgFailed, setImgFailed] = useState(false);
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col lg:grid lg:grid-cols-12">
+      {/* Left Visual Column: Editorial Campus Corridor Photography */}
+      <div className="relative lg:col-span-7 min-h-[260px] lg:min-h-screen bg-slate-900 overflow-hidden flex flex-col justify-between">
+        {!imgFailed ? (
+          <img
+            src={HERO_IMAGE_PATH}
+            alt="校園教學大樓晨間走廊實景"
+            referrerPolicy="no-referrer"
+            onError={() => setImgFailed(true)}
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-teal-950 to-slate-800" />
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-950/35 to-slate-950/25" />
+
+        <div className="relative z-10 p-6 lg:p-10">
+          <span className="text-lg font-bold tracking-tight text-white">
+            校園即時巡堂系統 CampusPatrol
+          </span>
+        </div>
+
+        <div className="relative z-10 p-6 lg:p-10 max-w-2xl space-y-4">
+          <h1
+            className="text-2xl sm:text-3xl lg:text-4xl font-bold text-white leading-tight tracking-tight"
+            style={{ textWrap: 'balance' }}
+          >
+            跨裝置即時巡堂、自動缺曠判別與異常事件推播平台
+          </h1>
+          <p className="text-sm sm:text-base text-slate-200 leading-relaxed max-w-xl">
+            整合全校課表資料庫與核准假單，協助學務處與值日教師於手機與桌機同步完成巡堂檢核、即時掌握班級出缺席狀態，一鍵匯出正式 PDF 與 Excel 報表。
+          </p>
+          <div className="pt-2 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-slate-300">
+            <span>多人帳號分權協作</span>
+            <span aria-hidden="true">·</span>
+            <span>行動裝置單手快速登錄</span>
+            <span aria-hidden="true">·</span>
+            <span>即時推播異常警示</span>
+            <span aria-hidden="true">·</span>
+            <span>Excel／PDF 正式報表</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Right Sign-In Column */}
+      <div className="lg:col-span-5 flex items-center justify-center p-6 sm:p-10 lg:p-14 bg-white">
+        <div className="w-full max-w-md space-y-8">
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-teal-700">教職員個別帳號登入</p>
+            <h2 className="text-2xl font-bold text-slate-900 tracking-tight">
+              登入巡堂管理工作台
+            </h2>
+            <p className="text-sm text-slate-600 leading-relaxed">
+              請使用您的 Google 帳號登入，系統將自動建立個別巡堂檔案並即時同步全校巡堂紀錄與課表資料。
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            <button
+              type="button"
+              onClick={onSignIn}
+              disabled={signingIn}
+              className="w-full min-h-[48px] px-5 py-3 bg-teal-700 hover:bg-teal-800 disabled:opacity-60 text-white text-sm font-semibold rounded-xl transition-colors flex items-center justify-center gap-3 cursor-pointer"
+            >
+              <ShieldCheck className="w-5 h-5 shrink-0" />
+              <span>{signingIn ? '正在驗證帳號...' : '使用 Google 帳號登入系統'}</span>
+            </button>
+
+            {errorMessage && (
+              <div className="p-3.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 leading-relaxed">
+                {errorMessage}
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-slate-200 pt-6 space-y-3.5">
+            <p className="text-xs font-semibold text-slate-500">系統核心功能</p>
+            <ul className="space-y-3 text-sm text-slate-600">
+              <li className="flex items-start gap-3">
+                <Smartphone className="w-4 h-4 text-teal-700 mt-0.5 shrink-0" />
+                <span>桌機儀表板與手機行動巡堂雙介面，走動巡視單手即可完成登錄</span>
+              </li>
+              <li className="flex items-start gap-3">
+                <ClipboardCheck className="w-4 h-4 text-teal-700 mt-0.5 shrink-0" />
+                <span>整合學校課表與假單資料，自動判別疑似曠課與連續缺課高風險</span>
+              </li>
+              <li className="flex items-start gap-3">
+                <BellRing className="w-4 h-4 text-teal-700 mt-0.5 shrink-0" />
+                <span>緊急異常即時推播與分級派發，完整追蹤接手至結案歷程</span>
+              </li>
+              <li className="flex items-start gap-3">
+                <FileSpreadsheet className="w-4 h-4 text-teal-700 mt-0.5 shrink-0" />
+                <span>一鍵匯出多工作表 Excel（.xlsx）、CSV 與含核章欄之 A4 PDF 報表</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};

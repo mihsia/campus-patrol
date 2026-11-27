@@ -1,0 +1,8 @@
+{
+  "name": "校園即時巡堂系統 CampusPatrol",
+  "description": "支援多人帳號登入與跨平台行動巡堂的校園即時巡堂管理系統，整合學校課表、自動缺曠課判別演算法、即時統計儀表板、異常事件通報及 PDF／Excel 報表匯出。",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
