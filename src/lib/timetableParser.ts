@@ -1,21 +1,4 @@
-import JSZip from 'jszip';
-import * as XLSX from 'xlsx';
-import {
-  AlignmentType,
-  BorderStyle,
-  Document,
-  Packer,
-  Paragraph,
-  ShadingType,
-  Table,
-  TableCell,
-  TableLayoutType,
-  TableRow,
-  TextRun,
-  VerticalAlign,
-  VerticalMergeType,
-  WidthType,
-} from 'docx';
+import type * as XLSXTypes from 'xlsx';
 import { parseTimetableCsv, type ParsedTimetableImportRow } from './exportReports';
 import { clampInt, clampString } from './validation';
 
@@ -966,6 +949,7 @@ async function parseDocxFile(
   defaultBuilding: string
 ): Promise<TimetableParseResult> {
   try {
+    const { default: JSZip } = await import('jszip');
     const buffer = await file.arrayBuffer();
     const zip = await JSZip.loadAsync(buffer);
     const docXmlFile = zip.file('word/document.xml');
@@ -1054,7 +1038,7 @@ async function parseDocxFile(
 // 2. Excel (.xlsx / .xls) Matrix & Flat Extractor
 // ============================================================================
 
-function sheetToGrid(ws: XLSX.WorkSheet): GridCell[][] {
+function sheetToGrid(ws: XLSXTypes.WorkSheet, XLSX: typeof XLSXTypes): GridCell[][] {
   const ref = ws['!ref'];
   if (!ref) return [];
   const range = XLSX.utils.decode_range(ref);
@@ -1167,6 +1151,7 @@ async function parseExcelFile(
   defaultBuilding: string
 ): Promise<TimetableParseResult> {
   try {
+    const XLSX = await import('xlsx');
     const buffer = await file.arrayBuffer();
     const wb = XLSX.read(buffer, { type: 'array' });
     const classes: ParsedClassTimetable[] = [];
@@ -1189,7 +1174,7 @@ async function parseExcelFile(
       }
 
       // 2. Otherwise parse as a Taiwanese school 日課表 matrix
-      const grid = sheetToGrid(ws);
+      const grid = sheetToGrid(ws, XLSX);
       const parsed = parseMatrixGridToClassTimetable({
         grid,
         precedingTitle: sheetName,
@@ -2216,6 +2201,23 @@ export async function downloadSampleTimetableDocx(
   schoolName = '宜蘭縣利澤國小',
   academicYear = '115'
 ): Promise<void> {
+  const {
+    AlignmentType,
+    BorderStyle,
+    Document,
+    Packer,
+    Paragraph,
+    ShadingType,
+    Table,
+    TableCell,
+    TableLayoutType,
+    TableRow,
+    TextRun,
+    VerticalAlign,
+    VerticalMergeType,
+    WidthType,
+  } = await import('docx');
+
   const font = { ascii: 'Times New Roman', hAnsi: 'Times New Roman', eastAsia: '標楷體' };
   const border = { style: BorderStyle.SINGLE, size: 6, color: '000000' };
   const borders = { top: border, bottom: border, left: border, right: border };
@@ -2257,7 +2259,7 @@ export async function downloadSampleTimetableDocx(
   // [0]節次 [1]分鐘 [2]時間 [3]一 [4-5]二(split 2) [6]三 [7]四 [8]五 [9]領域 [10]科目 [11]節數 [12]任課教師 -> 13 cols
   const colWidths = [550, 550, 1150, 950, 500, 500, 950, 950, 950, 800, 850, 600, 1050];
 
-  const rows: TableRow[] = [
+  const rows: Array<InstanceType<typeof TableRow>> = [
     new TableRow({
       children: [
         cell(`${schoolName} ${academicYear} 學年 一 年 忠 班 日課表`, {

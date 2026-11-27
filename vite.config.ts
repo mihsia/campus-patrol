@@ -105,8 +105,8 @@ export default defineConfig(() => {
           if (error) {
             return;
           }
-          const distDir = path.resolve(__dirname, 'dist');
-          const srcAssets = path.resolve(__dirname, 'src/assets');
+          const distDir = path.resolve(import.meta.dirname, 'dist');
+          const srcAssets = path.resolve(import.meta.dirname, 'src/assets');
           const distAssets = path.resolve(distDir, 'src/assets');
           if (fs.existsSync(distDir) && fs.existsSync(srcAssets)) {
             fs.cpSync(srcAssets, distAssets, { recursive: true, force: true });
@@ -116,7 +116,42 @@ export default defineConfig(() => {
     ],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(import.meta.dirname, '.'),
+      },
+    },
+    build: {
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            groups: [
+              {
+                name: 'vendor-react',
+                test: /node_modules\/(react|react-dom|scheduler)\//,
+                priority: 30,
+              },
+              {
+                name: 'vendor-firebase-auth',
+                test: /node_modules\/(@firebase\/auth|firebase\/auth)/,
+                priority: 26,
+              },
+              {
+                name: 'vendor-firebase-firestore',
+                test: /node_modules\/(@firebase\/firestore|firebase\/firestore)/,
+                priority: 25,
+              },
+              {
+                name: 'vendor-recharts',
+                test: /node_modules\/(recharts|d3-|victory-vendor)/,
+                priority: 20,
+              },
+              {
+                name: 'vendor-icons',
+                test: /node_modules\/lucide-react\//,
+                priority: 15,
+              },
+            ],
+          },
+        },
       },
     },
     server: {
