@@ -1,11 +1,17 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   onAuthStateChanged,
+  signInWithCustomToken,
   signInWithPopup,
   signOut,
   type User,
 } from 'firebase/auth';
 import { doc, onSnapshot, query, where } from 'firebase/firestore';
+import {
+  createAccountHubClient,
+  mapAuthError,
+  type HubAccountRecord,
+} from '@ltps/account-sdk/core';
 import {
   Activity,
   AlertTriangle,
@@ -31,7 +37,6 @@ import {
   INCIDENT_SEVERITY_LABELS,
   normalizeStaffRole,
   STAFF_ROLE_LABELS,
-  type AllowedAccount,
   type IncidentReport,
   type NavSection,
   type NotificationPreferences,
@@ -43,14 +48,19 @@ import {
 } from './types/patrol';
 import { CURRENT_APP_DATE, CURRENT_APP_VERSION } from './data/changelog';
 import {
+  ACCOUNT_HUB_URL,
   auth,
   db,
   googleProvider,
   handleFirestoreError,
+  hubAuth,
+  hubDb,
+  hubFunctions,
+  isAccountHubConfigured,
   OperationType,
 } from './lib/firebase';
-import { collectionRefs, verifyAndBootstrapGoogleUser } from './lib/firestoreOps';
-import { emailToAccountId } from './lib/validation';
+import { adaptHubAccountToPatrol, PATROL_APP_ID } from './lib/accountHubAdapter';
+import { collectionRefs, syncStaffProfileFromHub } from './lib/firestoreOps';
 import { seedCampusDemoDataset } from './lib/seedData';
 import {
   loadNotificationPrefs,
@@ -60,8 +70,13 @@ import {
   triggerBrowserPushNotification,
 } from './lib/notifications';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { AccessBlockedScreen, SignInScreen } from './components/SignInScreen';
+import {
+  AccessBlockedScreen,
+  HubConfigMissingScreen,
+  SignInScreen,
+} from './components/SignInScreen';
 import { OfflineBanner, PWAInstallButton } from './components/PWAInstallButton';
+import type { PatrolAccountStats } from './components/OverviewDashboardView';
 
 const OverviewDashboardView = lazy(() =>
   import('./components/OverviewDashboardView').then((m) => ({
@@ -125,6 +140,7 @@ interface BlockedInfo {
   email: string;
   displayName?: string;
   department?: string;
+  reason?: string;
 }
 
 function getQuickPeriodsWindow(current: number): number[] {
@@ -134,14 +150,22 @@ function getQuickPeriodsWindow(current: number): number[] {
 }
 
 function CampusPatrolApp() {
-  const [accessState, setAccessState] = useState<AccessState>('loading');
+  const [accessState, setAccessState] = useState<AccessState>(() =>
+    isAccountHubConfigured ? 'loading' : 'signed_out'
+  );
   const [blockedInfo, setBlockedInfo] = useState<BlockedInfo | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<StaffProfile | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [avatarFailed, setAvatarFailed] = useState(false);
+
+  const hubClient = useMemo(
+    () => (hubFunctions ? createAccountHubClient(hubFunctions) : null),
+    []
+  );
 
   // Navigation & Shared Time Context (always defaults to live current date & period)
   const [activeNav, setActiveNav] = useState<NavSection>('overview');
@@ -184,7 +208,7 @@ function CampusPatrolApp() {
   const [patrolLogs, setPatrolLogs] = useState<PatrolLog[]>([]);
   const [incidents, setIncidents] = useState<IncidentReport[]>([]);
   const [staffList, setStaffList] = useState<StaffProfile[]>([]);
-  const [allowedAccounts, setAllowedAccounts] = useState<AllowedAccount[]>([]);
+  const [accountStats, setAccountStats] = useState<PatrolAccountStats | null>(null);
 
   // Push Notification & Toast Feedback State
   const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences>(loadNotificationPrefs);
@@ -213,140 +237,205 @@ function CampusPatrolApp() {
     setPatrolLogs([]);
     setIncidents([]);
     setStaffList([]);
-    setAllowedAccounts([]);
+    setAccountStats(null);
     incidentsHydratedRef.current = false;
   }, []);
 
-  // 1. Google-Only Auth Listener & Allowlist Verification
+  // 1. Plan B Cross-Project Auth Listener:
+  //    hubAuth (ltps-account-hub) -> live /accounts/{uid} -> issueAppToken('patrol') -> signInWithCustomToken(auth)
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      setFirebaseUser(user);
-      setAvatarFailed(false);
-      if (!user) {
-        setProfile(null);
-        setIsAdmin(false);
-        setBlockedInfo(null);
-        clearOperationalData();
-        setAccessState('signed_out');
-        return;
-      }
+    if (!isAccountHubConfigured || !hubAuth || !hubDb || !hubClient) {
+      setAccessState('signed_out');
+      return;
+    }
 
-      const isGoogleProvider = user.providerData.some((p) => p.providerId === 'google.com');
-      if (!isGoogleProvider || !user.emailVerified || !user.email) {
-        setAuthError('本系統僅開放已完成驗證的 Google 帳號登入，請改用 Google 帳號重新登入。');
+    const activeHubAuth = hubAuth;
+    const activeHubDb = hubDb;
+    let stopped = false;
+    let generation = 0;
+    let accountUnsubscribe: (() => void) | null = null;
+
+    const signOutBusinessApp = () => {
+      if (auth.currentUser) {
+        void signOut(auth).catch(() => {});
+      }
+    };
+
+    const unsubAuth = onAuthStateChanged(activeHubAuth, (hubUser) => {
+      if (stopped) return;
+      const listenerGeneration = ++generation;
+      accountUnsubscribe?.();
+      accountUnsubscribe = null;
+
+      setFirebaseUser(hubUser);
+      setAvatarFailed(false);
+
+      if (!hubUser) {
+        signOutBusinessApp();
         setProfile(null);
         setIsAdmin(false);
+        setIsSuperAdmin(false);
+        setBlockedInfo(null);
         clearOperationalData();
         setAccessState('signed_out');
         return;
       }
 
       setAccessState('loading');
-      try {
-        const result = await verifyAndBootstrapGoogleUser({
-          uid: user.uid,
-          email: user.email,
-          displayName: user.displayName || '',
-        });
+      let syncedClaimsVersion: number | null = null;
+      let bootstrapRequested = false;
+      const accountRef = doc(activeHubDb, 'accounts', hubUser.uid);
 
-        if (result.status === 'unauthorized') {
-          setProfile(null);
-          setIsAdmin(false);
-          clearOperationalData();
-          setBlockedInfo({ email: result.email });
-          setAccessState('unauthorized');
-          return;
-        }
+      accountUnsubscribe = onSnapshot(
+        accountRef,
+        (snap) => {
+          if (stopped || listenerGeneration !== generation) return;
 
-        if (result.status === 'disabled') {
-          setProfile(null);
-          setIsAdmin(false);
-          clearOperationalData();
-          setBlockedInfo({
-            email: result.email,
-            displayName: result.displayName,
-            department: result.department,
-          });
-          setAccessState('disabled');
-          return;
-        }
+          if (!snap.exists()) {
+            const isBootstrapEmail =
+              (hubUser.email || '').trim().toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
+            if (isBootstrapEmail && !bootstrapRequested) {
+              bootstrapRequested = true;
+              void hubClient.getMyAccess(PATROL_APP_ID).catch((err) => {
+                if (stopped || listenerGeneration !== generation) return;
+                setAuthError(
+                  err instanceof Error ? err.message : '初始化校級管理者帳號失敗，請重新登入。'
+                );
+                signOutBusinessApp();
+                setAccessState('signed_out');
+              });
+              return;
+            }
 
-        setProfile(result.profile);
-        setIsAdmin(result.isAdmin);
-        setBlockedInfo(null);
-        setAuthError(null);
-        setAccessState('authorized');
-      } catch (err) {
-        setAuthError(err instanceof Error ? err.message : '驗證 Google 授權帳號時發生錯誤');
-        setProfile(null);
-        setIsAdmin(false);
-        clearOperationalData();
-        setAccessState('signed_out');
-      }
-    });
-    return () => unsub();
-  }, [clearOperationalData]);
-
-  // 2. Live Watcher on Own AllowedAccount (Instant Revocation & Live Role Sync)
-  useEffect(() => {
-    if (!firebaseUser || !firebaseUser.email || !firebaseUser.emailVerified) {
-      return;
-    }
-    if (accessState !== 'authorized') {
-      return;
-    }
-
-    const myEmail = firebaseUser.email.toLowerCase();
-    const isBootstrap = myEmail === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
-    const myAccountId = emailToAccountId(myEmail);
-
-    const unsubSelfAccount = onSnapshot(
-      doc(db, 'allowedAccounts', myAccountId),
-      (snap) => {
-        if (!snap.exists()) {
-          if (!isBootstrap) {
+            signOutBusinessApp();
             setProfile(null);
             setIsAdmin(false);
+            setIsSuperAdmin(false);
             clearOperationalData();
-            setBlockedInfo({ email: myEmail });
+            setBlockedInfo({
+              email: hubUser.email || '',
+              displayName: hubUser.displayName || undefined,
+              reason: '找不到此帳號於全校帳號管理中心的授權資料，請聯繫學校系統管理者。',
+            });
             setAccessState('unauthorized');
+            return;
           }
-          return;
-        }
 
-        const data = snap.data() as Omit<AllowedAccount, 'id'>;
-        if (!isBootstrap && data.status !== 'active') {
+          const rawAccount: HubAccountRecord = {
+            uid: hubUser.uid,
+            ...(snap.data() as Omit<HubAccountRecord, 'uid'>),
+          };
+          const adapted = adaptHubAccountToPatrol(rawAccount, {
+            fallbackEmail: hubUser.email || '',
+            fallbackDisplayName: hubUser.displayName || '',
+          });
+
+          if (adapted.status !== 'authorized') {
+            signOutBusinessApp();
+            setProfile(null);
+            setIsAdmin(false);
+            setIsSuperAdmin(false);
+            clearOperationalData();
+            setBlockedInfo({
+              email: adapted.email || hubUser.email || '',
+              displayName: adapted.displayName,
+              department: adapted.department,
+              reason: adapted.reason,
+            });
+            setAccessState(adapted.status);
+            return;
+          }
+
+          const needsTokenExchange =
+            syncedClaimsVersion !== adapted.claimsVersion || !auth.currentUser;
+
+          if (needsTokenExchange) {
+            syncedClaimsVersion = adapted.claimsVersion;
+            void (async () => {
+              try {
+                const brokerRes = await hubClient.issueAppToken(PATROL_APP_ID);
+                if (stopped || listenerGeneration !== generation) return;
+                await signInWithCustomToken(auth, brokerRes.customToken);
+                if (stopped || listenerGeneration !== generation) return;
+
+                const finalAdapted = adaptHubAccountToPatrol(rawAccount, {
+                  fallbackEmail: hubUser.email || '',
+                  fallbackDisplayName: hubUser.displayName || '',
+                  targetUid: brokerRes.uid,
+                });
+                if (finalAdapted.status !== 'authorized') return;
+
+                void syncStaffProfileFromHub(finalAdapted.profile);
+                setProfile(finalAdapted.profile);
+                setIsAdmin(finalAdapted.isAdmin);
+                setIsSuperAdmin(finalAdapted.isSuperAdmin);
+                setBlockedInfo(null);
+                setAuthError(null);
+                setAccessState('authorized');
+              } catch (err) {
+                if (stopped || listenerGeneration !== generation) return;
+                syncedClaimsVersion = null;
+                signOutBusinessApp();
+                setProfile(null);
+                setIsAdmin(false);
+                setIsSuperAdmin(false);
+                clearOperationalData();
+                const errCode = (err as { code?: string })?.code || '';
+                const errMsg =
+                  err instanceof Error ? err.message : '換發校園巡堂系統登入憑證失敗，請稍後再試。';
+                if (errCode.includes('permission-denied')) {
+                  setBlockedInfo({
+                    email: hubUser.email || '',
+                    displayName: rawAccount.name,
+                    department: rawAccount.dept,
+                    reason: errMsg,
+                  });
+                  setAccessState('unauthorized');
+                } else {
+                  setAuthError(errMsg);
+                  setAccessState('signed_out');
+                }
+              }
+            })();
+            return;
+          }
+
+          // Profile metadata updated without claimsVersion change
+          const currentTargetUid = auth.currentUser?.uid || adapted.profile.uid;
+          const syncedProfile: StaffProfile = {
+            ...adapted.profile,
+            uid: currentTargetUid,
+          };
+          void syncStaffProfileFromHub(syncedProfile);
+          setProfile(syncedProfile);
+          setIsAdmin(adapted.isAdmin);
+          setIsSuperAdmin(adapted.isSuperAdmin);
+          setBlockedInfo(null);
+          setAuthError(null);
+          setAccessState('authorized');
+        },
+        (err) => {
+          if (stopped || listenerGeneration !== generation) return;
+          signOutBusinessApp();
           setProfile(null);
           setIsAdmin(false);
+          setIsSuperAdmin(false);
           clearOperationalData();
-          setBlockedInfo({
-            email: myEmail,
-            displayName: data.displayName,
-            department: data.department,
-          });
-          setAccessState('disabled');
-          return;
+          setAuthError(
+            err instanceof Error ? `讀取帳號中心權限失敗：${err.message}` : '讀取帳號中心權限失敗'
+          );
+          setAccessState('signed_out');
         }
+      );
+    });
 
-        const nextRole = isBootstrap ? 'admin' : normalizeStaffRole(data.role);
-        setIsAdmin(nextRole === 'admin');
-        setProfile((prev) =>
-          prev
-            ? {
-                ...prev,
-                displayName: data.displayName || prev.displayName,
-                department: data.department || prev.department,
-                jobTitle: data.jobTitle || prev.jobTitle,
-                role: nextRole,
-              }
-            : prev
-        );
-      },
-      (error) => handleFirestoreError(error, OperationType.GET, `allowedAccounts/${myAccountId}`)
-    );
-
-    return () => unsubSelfAccount();
-  }, [firebaseUser, accessState, clearOperationalData]);
+    return () => {
+      stopped = true;
+      generation += 1;
+      accountUnsubscribe?.();
+      unsubAuth();
+    };
+  }, [clearOperationalData, hubClient]);
 
   // 3. Real-time Operational Firestore Listeners (Strictly after Authorized)
   useEffect(() => {
@@ -480,43 +569,52 @@ function CampusPatrolApp() {
     };
   }, [accessState, firebaseUser, profile?.uid]);
 
-  // 4. Admin-Only Live Listener for Authorized Google Accounts Directory
+  // 4. Admin-Only Summary Fetch from Central Account Hub (for Overview Dashboard KPI)
   useEffect(() => {
-    if (accessState !== 'authorized' || !isAdmin) {
-      setAllowedAccounts([]);
+    if (accessState !== 'authorized' || !isAdmin || !hubClient) {
+      setAccountStats(null);
       return;
     }
 
-    const qAccounts = query(collectionRefs.allowedAccounts(), where('campusId', '==', CAMPUS_ID));
-    const unsubAccounts = onSnapshot(
-      qAccounts,
-      (snap) => {
-        setAllowedAccounts(
-          snap.docs.map((d) => {
-            const raw = d.data() as Omit<AllowedAccount, 'id'>;
-            return {
-              id: d.id,
-              ...raw,
-              role: normalizeStaffRole(raw.role),
-            };
-          })
-        );
-      },
-      (error) => handleFirestoreError(error, OperationType.LIST, 'allowedAccounts')
-    );
+    let cancelled = false;
+    void hubClient
+      .listAppAccounts(PATROL_APP_ID)
+      .then((res) => {
+        if (cancelled) return;
+        let active = 0;
+        let disabled = 0;
+        for (const acc of res.accounts || []) {
+          const isEffectiveActive =
+            acc.globalStatus === 'active' &&
+            (acc.isSuperAdmin || acc.appAccess?.status === 'active');
+          if (isEffectiveActive) active += 1;
+          else disabled += 1;
+        }
+        setAccountStats({ active, disabled });
+      })
+      .catch(() => {
+        // Non-fatal: OverviewDashboardView falls back to staffList.length when offline
+      });
 
-    return () => unsubAccounts();
-  }, [accessState, isAdmin]);
+    return () => {
+      cancelled = true;
+    };
+  }, [accessState, isAdmin, hubClient, activeNav]);
 
   const handleSignIn = async () => {
+    if (!hubAuth) {
+      setAuthError('尚未設定全校統一帳號管理中心環境變數，無法進行登入。');
+      return;
+    }
     setSigningIn(true);
     setAuthError(null);
     try {
-      await signInWithPopup(auth, googleProvider);
+      await signInWithPopup(hubAuth, googleProvider);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : '登入失敗，請重試';
-      if (!msg.includes('popup-closed-by-user')) {
-        setAuthError(`Google 登入未完成：${msg}`);
+      const code = (err as { code?: string })?.code;
+      const mapped = mapAuthError(code);
+      if (mapped) {
+        setAuthError(mapped);
       }
     } finally {
       setSigningIn(false);
@@ -524,11 +622,14 @@ function CampusPatrolApp() {
   };
 
   const handleSignOut = async () => {
-    await signOut(auth);
+    await Promise.all([
+      hubAuth ? signOut(hubAuth).catch(() => {}) : Promise.resolve(),
+      signOut(auth).catch(() => {}),
+    ]);
   };
 
   const handleSwitchAccount = async () => {
-    await signOut(auth);
+    await handleSignOut();
     await handleSignIn();
   };
 
@@ -716,12 +817,16 @@ function CampusPatrolApp() {
   const quickPeriods = useMemo(() => getQuickPeriodsWindow(selectedPeriod), [selectedPeriod]);
   const selectedDayLabel = getDayOfWeekLabel(selectedDate);
 
+  if (!isAccountHubConfigured) {
+    return <HubConfigMissingScreen />;
+  }
+
   if (accessState === 'loading') {
     return (
       <div className="min-h-screen bg-[#F6F4EE] flex items-center justify-center p-6">
         <div className="text-center space-y-2.5">
           <div className="w-8 h-8 border-2 border-[#1E5C4B] border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-sm text-[#5C615C]">正在驗證 Google 授權帳號與校園資料庫...</p>
+          <p className="text-sm text-[#5C615C]">正在驗證全校統一帳號與校園巡堂憑證...</p>
         </div>
       </div>
     );
@@ -734,6 +839,8 @@ function CampusPatrolApp() {
         email={blockedInfo?.email || firebaseUser?.email || ''}
         displayName={blockedInfo?.displayName}
         department={blockedInfo?.department}
+        detailMessage={blockedInfo?.reason}
+        hubUrl={ACCOUNT_HUB_URL}
         onSignOut={handleSignOut}
         onSwitchAccount={handleSwitchAccount}
       />
@@ -1028,7 +1135,7 @@ function CampusPatrolApp() {
                 timetableArchives={timetableArchives}
                 patrolLogs={patrolLogs}
                 incidents={incidents}
-                allowedAccounts={allowedAccounts}
+                accountStats={accountStats}
                 staffList={staffList}
                 onNavigate={setActiveNav}
                 onJumpToBuildingLive={(building, targetDate) => {
@@ -1159,11 +1266,11 @@ function CampusPatrolApp() {
               <StaffView
                 profile={profile}
                 userEmail={firebaseUser.email || ''}
+                hubUserUid={firebaseUser.uid}
                 isAdmin={isAdmin}
-                allowedAccounts={allowedAccounts}
+                isSuperAdmin={isSuperAdmin}
                 staffList={staffList}
                 onSignOut={handleSignOut}
-                onActionFeedback={showFeedback}
               />
             )}
 

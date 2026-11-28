@@ -29,7 +29,6 @@ import {
   YAxis,
 } from 'recharts';
 import type {
-  AllowedAccount,
   IncidentReport,
   NavSection,
   PatrolLog,
@@ -54,6 +53,11 @@ import {
 import { getIncidentElapsedMinutes, isIncidentOverdueEscalation } from '../lib/notifications';
 import { CURRENT_APP_VERSION } from '../data/changelog';
 
+export interface PatrolAccountStats {
+  active: number;
+  disabled: number;
+}
+
 interface OverviewDashboardViewProps {
   profile: StaffProfile;
   isAdmin: boolean;
@@ -62,7 +66,7 @@ interface OverviewDashboardViewProps {
   timetableArchives: TimetableArchive[];
   patrolLogs: PatrolLog[];
   incidents: IncidentReport[];
-  allowedAccounts: AllowedAccount[];
+  accountStats?: PatrolAccountStats | null;
   staffList: StaffProfile[];
   onNavigate: (section: NavSection) => void;
   onJumpToBuildingLive: (building: string, targetDate?: string) => void;
@@ -97,7 +101,7 @@ export const OverviewDashboardView: React.FC<OverviewDashboardViewProps> = ({
   timetableArchives,
   patrolLogs,
   incidents,
-  allowedAccounts,
+  accountStats,
   staffList,
   onNavigate,
   onJumpToBuildingLive,
@@ -162,8 +166,8 @@ export const OverviewDashboardView: React.FC<OverviewDashboardViewProps> = ({
       (i) => i.reporterId === profile.uid || i.handlerId === profile.uid
     ).length;
 
-    const activeAccountsCount = allowedAccounts.filter((a) => a.status === 'active').length;
-    const disabledAccountsCount = allowedAccounts.filter((a) => a.status === 'disabled').length;
+    const activeAccountsCount = accountStats?.active ?? 0;
+    const disabledAccountsCount = accountStats?.disabled ?? 0;
 
     return {
       totalClassCount,
@@ -187,7 +191,7 @@ export const OverviewDashboardView: React.FC<OverviewDashboardViewProps> = ({
     distinctClasses,
     incidents,
     profile.uid,
-    allowedAccounts,
+    accountStats,
   ]);
 
   // Weekly 5-day (Mon–Fri) trend chart data
