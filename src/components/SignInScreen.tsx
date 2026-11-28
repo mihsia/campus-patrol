@@ -46,11 +46,11 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({
         <div className="absolute inset-0 bg-gradient-to-t from-[#122620]/90 via-[#15352C]/45 to-[#122620]/30" />
 
         <div className="relative z-10 p-6 lg:p-10 flex items-center gap-3">
-          <span className="w-10 h-10 rounded-xl bg-[#1E5C4B] border border-white/20 flex items-center justify-center shrink-0">
-            <span className="w-6 h-6 rounded-full bg-[#C98A2E] flex items-center justify-center">
-              <Check className="w-3.5 h-3.5 text-[#FAF9F5] stroke-[3]" />
-            </span>
-          </span>
+          <img
+            src="/icon.svg"
+            alt="校園即時巡堂系統圖示"
+            className="w-10 h-10 rounded-xl border border-white/25 shrink-0 shadow-sm"
+          />
           <span className="text-lg font-bold tracking-tight text-white">
             校園即時巡堂系統 CampusPatrol
           </span>

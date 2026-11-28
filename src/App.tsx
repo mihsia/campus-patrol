@@ -18,7 +18,6 @@ import {
   Bell,
   BookOpen,
   Building2,
-  Check,
   ClipboardCheck,
   FileText,
   HelpCircle,
@@ -870,11 +869,11 @@ function CampusPatrolApp() {
             onClick={() => setActiveNav('overview')}
             className="flex items-center gap-2.5 sm:gap-3 text-left group cursor-pointer shrink-0"
           >
-            <span className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-[#1E5C4B] flex items-center justify-center shrink-0">
-              <span className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-[#C98A2E] flex items-center justify-center">
-                <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#FAF9F5] stroke-[3]" />
-              </span>
-            </span>
+            <img
+              src="/icon.svg"
+              alt={`${schoolSettings.schoolName}教學巡堂系統圖示`}
+              className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl shrink-0 shadow-xs"
+            />
             <span className="text-[15px] sm:text-lg font-bold tracking-tight text-[#1F2421] group-hover:text-[#1E5C4B] transition-colors whitespace-nowrap">
               {schoolSettings.schoolName}教學巡堂系統
             </span>
