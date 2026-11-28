@@ -1,20 +1,3 @@
-import * as XLSX from 'xlsx';
-import {
-  AlignmentType,
-  BorderStyle,
-  Document,
-  HeightRule,
-  Packer,
-  Paragraph,
-  Table,
-  TableCell,
-  TableLayoutType,
-  TableRow,
-  TextRun,
-  VerticalAlign,
-  VerticalMergeType,
-  WidthType,
-} from 'docx';
 import type {
   IncidentReport,
   PatrolCheckItem,
@@ -217,31 +200,8 @@ const FONT_KAITI = {
   cs: 'Times New Roman',
 };
 
-const THIN_BLACK_BORDER = {
-  style: BorderStyle.SINGLE,
-  size: 6,
-  color: '000000',
-};
-
-const ALL_CELL_BORDERS = {
-  top: THIN_BLACK_BORDER,
-  bottom: THIN_BLACK_BORDER,
-  left: THIN_BLACK_BORDER,
-  right: THIN_BLACK_BORDER,
-};
-
 function checkGlyph(checked: boolean): string {
   return checked ? '☑' : '☐';
-}
-
-function makeTextRun(text: string, opts?: { bold?: boolean; size?: number }): TextRun {
-  return new TextRun({
-    text,
-    bold: opts?.bold ?? false,
-    size: opts?.size ?? 21, // 10.5pt (half-points)
-    font: FONT_KAITI,
-    color: '000000',
-  });
 }
 
 /**
@@ -257,6 +217,45 @@ export async function exportPatrolWordDocx(params: {
   incidents?: IncidentReport[];
   includeIncidentsAppendix?: boolean;
 }): Promise<void> {
+  const {
+    AlignmentType,
+    BorderStyle,
+    Document,
+    HeightRule,
+    Packer,
+    Paragraph,
+    Table,
+    TableCell,
+    TableLayoutType,
+    TableRow,
+    TextRun,
+    VerticalAlign,
+    VerticalMergeType,
+    WidthType,
+  } = await import('docx');
+
+  const THIN_BLACK_BORDER = {
+    style: BorderStyle.SINGLE,
+    size: 6,
+    color: '000000',
+  };
+
+  const ALL_CELL_BORDERS = {
+    top: THIN_BLACK_BORDER,
+    bottom: THIN_BLACK_BORDER,
+    left: THIN_BLACK_BORDER,
+    right: THIN_BLACK_BORDER,
+  };
+
+  const makeTextRun = (text: string, opts?: { bold?: boolean; size?: number }) =>
+    new TextRun({
+      text,
+      bold: opts?.bold ?? false,
+      size: opts?.size ?? 21, // 10.5pt (half-points)
+      font: FONT_KAITI,
+      color: '000000',
+    });
+
   const {
     schoolSettings,
     weekNumber,
@@ -372,14 +371,14 @@ export async function exportPatrolWordDocx(params: {
     ],
   });
 
-  const dataRows: TableRow[] = [];
+  const dataRows: Array<InstanceType<typeof TableRow>> = [];
 
   rows.forEach((item) => {
     const has = (k: PatrolCheckItem) => item.checklist.includes(k);
     const hasNote = item.note.trim().length > 0;
 
     // Row A: Class / Teacher / Subject / 8-item checklist (4 lines)
-    const classParagraphs: Paragraph[] = [
+    const classParagraphs: Array<InstanceType<typeof Paragraph>> = [
       new Paragraph({
         alignment: AlignmentType.CENTER,
         children: [makeTextRun(item.classLabel, { bold: true, size: 22 })],
@@ -547,7 +546,7 @@ export async function exportPatrolWordDocx(params: {
     rows: [headerRow1, headerRow2, ...dataRows],
   });
 
-  const sectionChildren: Array<Paragraph | Table> = [
+  const sectionChildren: Array<InstanceType<typeof Paragraph> | InstanceType<typeof Table>> = [
     new Paragraph({
       alignment: AlignmentType.CENTER,
       spacing: { after: 160 },
@@ -680,13 +679,14 @@ export async function exportPatrolWordDocx(params: {
 /**
  * Exports Excel (.xlsx) workbook with Patrol Logs + Incidents (no student attendance sheets).
  */
-export function exportPatrolExcelWorkbook(params: {
+export async function exportPatrolExcelWorkbook(params: {
   schoolSettings: SchoolSettings;
   startDate: string;
   endDate: string;
   patrolLogs: PatrolLog[];
   incidents: IncidentReport[];
-}): void {
+}): Promise<void> {
+  const XLSX = await import('xlsx');
   const { schoolSettings, startDate, endDate, patrolLogs, incidents } = params;
   const wb = XLSX.utils.book_new();
 

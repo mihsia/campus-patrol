@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   onAuthStateChanged,
   signInWithPopup,
@@ -58,14 +58,29 @@ import {
 } from './lib/notifications';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AccessBlockedScreen, SignInScreen } from './components/SignInScreen';
-import { DashboardView } from './components/DashboardView';
-import { PatrolWorkspaceView } from './components/PatrolWorkspaceView';
-import { IncidentsView } from './components/IncidentsView';
-import { BasicDataView } from './components/BasicDataView';
-import { TimetableTruancyView } from './components/TimetableTruancyView';
-import { ReportsView } from './components/ReportsView';
-import { StaffView } from './components/StaffView';
 import { OfflineBanner, PWAInstallButton } from './components/PWAInstallButton';
+
+const DashboardView = lazy(() =>
+  import('./components/DashboardView').then((m) => ({ default: m.DashboardView }))
+);
+const PatrolWorkspaceView = lazy(() =>
+  import('./components/PatrolWorkspaceView').then((m) => ({ default: m.PatrolWorkspaceView }))
+);
+const IncidentsView = lazy(() =>
+  import('./components/IncidentsView').then((m) => ({ default: m.IncidentsView }))
+);
+const BasicDataView = lazy(() =>
+  import('./components/BasicDataView').then((m) => ({ default: m.BasicDataView }))
+);
+const TimetableTruancyView = lazy(() =>
+  import('./components/TimetableTruancyView').then((m) => ({ default: m.TimetableTruancyView }))
+);
+const ReportsView = lazy(() =>
+  import('./components/ReportsView').then((m) => ({ default: m.ReportsView }))
+);
+const StaffView = lazy(() =>
+  import('./components/StaffView').then((m) => ({ default: m.StaffView }))
+);
 
 interface SidebarNavItem {
   key: string;
@@ -912,6 +927,14 @@ function CampusPatrolApp() {
           )}
 
           <main className="flex-1 p-4 sm:p-6 pb-20 lg:pb-8 max-w-[1360px] w-full mx-auto print:p-0 print:max-w-none">
+            <Suspense
+              fallback={
+                <div className="min-h-[40vh] flex flex-col items-center justify-center gap-3 text-[#5A5F5A]">
+                  <div className="w-7 h-7 border-2 border-[#1E5C4B] border-t-transparent rounded-full animate-spin" />
+                  <p className="text-sm font-medium">正在載入頁面模組…</p>
+                </div>
+              }
+            >
             {activeNav === 'dashboard' && (
               <DashboardView
                 schoolSettings={schoolSettings}
@@ -1037,6 +1060,7 @@ function CampusPatrolApp() {
                 onActionFeedback={showFeedback}
               />
             )}
+            </Suspense>
           </main>
         </div>
       </div>

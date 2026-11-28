@@ -126,15 +126,21 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     }
   };
 
-  const handleExportExcel = () => {
-    exportPatrolExcelWorkbook({
-      schoolSettings: effectiveSettings,
-      startDate,
-      endDate,
-      patrolLogs: filteredLogs,
-      incidents: filteredIncidents,
-    });
-    onActionFeedback('已匯出巡堂紀錄 Excel 報表（.xlsx）');
+  const handleExportExcel = async () => {
+    try {
+      await exportPatrolExcelWorkbook({
+        schoolSettings: effectiveSettings,
+        startDate,
+        endDate,
+        patrolLogs: filteredLogs,
+        incidents: filteredIncidents,
+      });
+      onActionFeedback('已匯出巡堂紀錄 Excel 報表（.xlsx）');
+    } catch (err) {
+      onActionFeedback(
+        `Excel 匯出失敗：${err instanceof Error ? err.message : '請稍後再試'}`
+      );
+    }
   };
 
   const handlePrintPdf = () => {

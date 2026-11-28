@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { Suspense, lazy, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Archive,
@@ -41,7 +41,10 @@ import {
   updateTimetableSlot,
 } from '../lib/firestoreOps';
 import { exportTimetableBackupCsv } from '../lib/exportReports';
-import { TimetableImportModal } from './TimetableImportModal';
+
+const TimetableImportModal = lazy(() =>
+  import('./TimetableImportModal').then((m) => ({ default: m.TimetableImportModal }))
+);
 
 interface TimetableViewProps {
   profile: StaffProfile;
@@ -730,23 +733,34 @@ export const TimetableTruancyView: React.FC<TimetableViewProps> = ({
 
       {/* School Timetable File Reader & Import Wizard Modal */}
       {showImportModal && (
-        <TimetableImportModal
-          uid={profile.uid}
-          schoolSettings={schoolSettings}
-          existingTimetables={timetables}
-          onClose={() => setShowImportModal(false)}
-          onImported={({ importedCount, replacedCount, classNames }) => {
-            setShowImportModal(false);
-            if (classNames[0]) {
-              setSelectedClassName(classNames[0]);
-              setViewMode('weekly');
-            }
-            const replaceMsg = replacedCount > 0 ? `（已覆蓋舊課表 ${replacedCount} 筆）` : '';
-            onActionFeedback(
-              `已成功轉入 ${classNames.join('、')} 共 ${importedCount} 節巡堂課表${replaceMsg}，現在即可於行動巡堂使用！`
-            );
-          }}
-        />
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-50 bg-[#1F2421]/40 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-[#FAF9F5] border border-[#E5E1D8] rounded-2xl px-6 py-5 flex items-center gap-3 shadow-lg">
+                <div className="w-5 h-5 border-2 border-[#1E5C4B] border-t-transparent rounded-full animate-spin" />
+                <span className="text-sm font-medium text-[#1F2421]">正在載入課表匯入精靈…</span>
+              </div>
+            </div>
+          }
+        >
+          <TimetableImportModal
+            uid={profile.uid}
+            schoolSettings={schoolSettings}
+            existingTimetables={timetables}
+            onClose={() => setShowImportModal(false)}
+            onImported={({ importedCount, replacedCount, classNames }) => {
+              setShowImportModal(false);
+              if (classNames[0]) {
+                setSelectedClassName(classNames[0]);
+                setViewMode('weekly');
+              }
+              const replaceMsg = replacedCount > 0 ? `（已覆蓋舊課表 ${replacedCount} 筆）` : '';
+              onActionFeedback(
+                `已成功轉入 ${classNames.join('、')} 共 ${importedCount} 節巡堂課表${replaceMsg}，現在即可於行動巡堂使用！`
+              );
+            }}
+          />
+        </Suspense>
       )}
 
       {/* Add Timetable Slot Modal */}
