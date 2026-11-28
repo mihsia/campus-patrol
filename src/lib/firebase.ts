@@ -8,17 +8,43 @@ import {
   type Firestore,
 } from 'firebase/firestore';
 import { getFunctions, type Functions } from 'firebase/functions';
-import firebaseConfig from '../../firebase-applet-config.json';
+import firebaseAppletConfig from '../../firebase-applet-config.json';
 
 export const ACCOUNT_HUB_APP_NAME = 'ltps-account-hub';
 export const ACCOUNT_HUB_URL =
   import.meta.env.VITE_ACCOUNT_HUB_URL || 'https://ltps-account-hub.mihsia.workers.dev';
+
+// 若已設定獨立 Firebase 專案環境變數（如 ltps-campus-patrol），優先使用並預設連線 (default) 資料庫；
+// 未設定時自動沿用既有 firebase-applet-config.json（零停機平滑遷移）。
+const useStandaloneFirebase = Boolean(
+  import.meta.env.VITE_FIREBASE_PROJECT_ID && import.meta.env.VITE_FIREBASE_API_KEY
+);
+
+const firebaseConfig = useStandaloneFirebase
+  ? {
+      apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+      authDomain:
+        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ||
+        `${import.meta.env.VITE_FIREBASE_PROJECT_ID}.firebaseapp.com`,
+      projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+      storageBucket:
+        import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ||
+        `${import.meta.env.VITE_FIREBASE_PROJECT_ID}.firebasestorage.app`,
+      messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
+      appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
+    }
+  : firebaseAppletConfig;
+
+const targetDatabaseId = useStandaloneFirebase
+  ? import.meta.env.VITE_FIREBASE_DATABASE_ID || '(default)'
+  : firebaseAppletConfig.firestoreDatabaseId;
 
 const existingApps = getApps();
 const app: FirebaseApp =
   existingApps.find((a) => a.name === '[DEFAULT]') || initializeApp(firebaseConfig);
 
 function createFirestoreInstance(targetApp: FirebaseApp, databaseId?: string): Firestore {
+  const namedDb = databaseId && databaseId !== '(default)' ? databaseId : undefined;
   try {
     return initializeFirestore(
       targetApp,
@@ -27,17 +53,16 @@ function createFirestoreInstance(targetApp: FirebaseApp, databaseId?: string): F
           tabManager: persistentMultipleTabManager(),
         }),
       },
-      databaseId
+      namedDb
     );
   } catch (error) {
     // Graceful fallback when IndexedDB is unavailable (e.g. private browsing) or during HMR re-init
     console.warn('Firestore persistent cache unavailable, falling back to default cache:', error);
-    return databaseId ? getFirestore(targetApp, databaseId) : getFirestore(targetApp);
+    return namedDb ? getFirestore(targetApp, namedDb) : getFirestore(targetApp);
   }
 }
 
-// CRITICAL: Bind business operational database to the provisioned named Firestore database ID
-export const db = createFirestoreInstance(app, firebaseConfig.firestoreDatabaseId);
+export const db = createFirestoreInstance(app, targetDatabaseId);
 export const auth: Auth = getAuth(app);
 
 // 方案 B：第二個具名 Firebase App，連接獨立的校級帳號管理中心（ltps-account-hub）
