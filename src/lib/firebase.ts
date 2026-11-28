@@ -1,12 +1,38 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
+import {
+  doc,
+  getDocFromServer,
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  type Firestore,
+} from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 
+function createFirestoreInstance(): Firestore {
+  try {
+    return initializeFirestore(
+      app,
+      {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager(),
+        }),
+      },
+      firebaseConfig.firestoreDatabaseId
+    );
+  } catch (error) {
+    // Graceful fallback when IndexedDB is unavailable (e.g. private browsing) or during HMR re-init
+    console.warn('Firestore persistent cache unavailable, falling back to default cache:', error);
+    return getFirestore(app, firebaseConfig.firestoreDatabaseId);
+  }
+}
+
 // CRITICAL: Bind to the provisioned named Firestore database ID from firebase-applet-config.json
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = createFirestoreInstance();
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });

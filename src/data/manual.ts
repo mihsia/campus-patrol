@@ -149,10 +149,10 @@ export const MANUAL_SECTIONS: ManualSection[] = [
     id: 'pwa',
     title: '安裝為手機／電腦應用程式',
     paragraphs: [
-      '本系統支援 Progressive Web App（PWA），可直接安裝至手機主畫面或電腦桌面，享有全螢幕無網址列介面、快速啟動與離線快取瀏覽體驗。',
+      '本系統支援 Progressive Web App（PWA）並已啟用 Firestore IndexedDB 多分頁本機離線快取，可直接安裝至手機主畫面或電腦桌面，享有全螢幕無網址列介面、快速啟動與弱訊號／斷網時仍可檢視快取資料、恢復連線後自動同步的完整離線體驗。',
     ],
     steps: [
-      'Android／Chrome／Edge：點擊左側選單底部或標題列的「安裝應用程式」按鈕，依提示確認安裝。',
+      'Android／Chrome／Edge：點擊左側選單底部或標題列的「安裝巡堂 App」按鈕，依提示確認安裝。',
       'iPhone／iPad（Safari）：點擊瀏覽器底部「分享」圖示，選擇「加入主畫面」即可像原生 App 一樣開啟巡堂通。',
     ],
   },
