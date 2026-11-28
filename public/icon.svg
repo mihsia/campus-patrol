@@ -1,20 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <rect width="512" height="512" rx="112" fill="#1E5C4B" />
-  <circle cx="256" cy="256" r="176" fill="#C98A2E" />
-  <circle cx="256" cy="256" r="144" fill="#1E5C4B" opacity="0.16" />
-  <path
-    d="M172 172h168a24 24 0 0 1 24 24v120a24 24 0 0 1-24 24H172a24 24 0 0 1-24-24V196a24 24 0 0 1 24-24z"
-    fill="none"
-    stroke="#FAF9F5"
-    stroke-width="20"
-    stroke-linejoin="round"
-  />
-  <path
-    d="M214 256l28 28 58-60"
-    fill="none"
-    stroke="#FAF9F5"
-    stroke-width="24"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#137A71" />
+      <stop offset="100%" stop-color="#0C5E57" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+  <rect x="136" y="138" width="240" height="270" rx="34" fill="#FFFFFF" fill-opacity="0.14" stroke="#FFFFFF" stroke-width="24" stroke-linejoin="round" />
+  <rect x="192" y="106" width="128" height="54" rx="22" fill="#FFFFFF" />
+  <circle cx="256" cy="133" r="10" fill="#106F67" />
+  <path d="M198 282L238 322L318 236" stroke="#FFFFFF" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" />
 </svg>
