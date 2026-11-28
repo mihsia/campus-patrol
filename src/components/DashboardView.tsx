@@ -33,7 +33,6 @@ import type {
 } from '../types/patrol';
 import {
   ALL_PATROL_CHECKLIST_ITEMS,
-  DAY_OF_WEEK_LABELS,
   INCIDENT_CATEGORY_LABELS,
   INCIDENT_SEVERITY_LABELS,
   INCIDENT_STATUS_LABELS,
@@ -41,8 +40,12 @@ import {
   PATROL_ISSUE_ITEMS,
   PATROL_STATUS_LABELS,
   PERIOD_SCHEDULE,
-  getDayOfWeekFromDate,
+  getCalendarDayOfWeek,
+  getDayOfWeekLabel,
   getEffectiveChecklist,
+  getLatestSchoolDateString,
+  getTodayDateString,
+  isWeekendDate,
 } from '../types/patrol';
 import { getIncidentElapsedMinutes, isIncidentOverdueEscalation } from '../lib/notifications';
 
@@ -81,7 +84,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   seeding,
   isAdmin,
 }) => {
-  const dayOfWeek = getDayOfWeekFromDate(selectedDate);
+  const calendarDayOfWeek = getCalendarDayOfWeek(selectedDate);
+  const selectedWeekdayLabel = getDayOfWeekLabel(selectedDate);
+  const isWeekend = isWeekendDate(selectedDate);
+  const todayStr = getTodayDateString();
+  const latestSchoolDate = getLatestSchoolDateString(selectedDate);
 
   const buildings = useMemo(() => {
     const ordered = [...schoolSettings.buildings];
@@ -95,14 +102,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const periodSlots = useMemo(() => {
     return timetables
-      .filter((t) => t.dayOfWeek === dayOfWeek && t.period === selectedPeriod)
+      .filter((t) => t.dayOfWeek === calendarDayOfWeek && t.period === selectedPeriod)
       .filter((t) => selectedBuilding === 'ALL' || t.building === selectedBuilding)
       .sort(
         (a, b) =>
           a.building.localeCompare(b.building, 'zh-Hant') ||
           a.roomNumber.localeCompare(b.roomNumber)
       );
-  }, [timetables, dayOfWeek, selectedPeriod, selectedBuilding]);
+  }, [timetables, calendarDayOfWeek, selectedPeriod, selectedBuilding]);
 
   const todayLogs = useMemo(
     () =>
@@ -193,7 +200,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return PERIOD_SCHEDULE.map((p) => {
       const slotsCount = timetables.filter(
         (t) =>
-          t.dayOfWeek === dayOfWeek &&
+          t.dayOfWeek === calendarDayOfWeek &&
           t.period === p.period &&
           (selectedBuilding === 'ALL' || t.building === selectedBuilding)
       ).length;
@@ -210,7 +217,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         待改善異常: issueCount,
       };
     });
-  }, [timetables, dayOfWeek, selectedBuilding, todayLogs]);
+  }, [timetables, calendarDayOfWeek, selectedBuilding, todayLogs]);
 
   const activeIncidentsList = useMemo(() => {
     const severityOrder = { high: 0, medium: 1, low: 2 };
@@ -276,12 +283,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <input
                 type="date"
                 value={selectedDate}
-                onChange={(e) => onChangeDate(e.target.value)}
+                onChange={(e) => e.target.value && onChangeDate(e.target.value)}
                 className="min-h-[40px] px-3 py-1.5 text-sm font-mono-num bg-[#FAF9F5] border border-[#E5E1D8] rounded-xl text-[#1F2421] focus:outline-none focus:ring-2 focus:ring-[#1E5C4B]/15 focus:border-[#1E5C4B]"
               />
             </label>
+            {selectedDate !== todayStr && (
+              <button
+                type="button"
+                onClick={() => onChangeDate(todayStr)}
+                className="min-h-[36px] px-3 py-1 text-xs font-semibold rounded-xl bg-[#E5F2EE] hover:bg-[#D5EAE3] text-[#1E5C4B] whitespace-nowrap cursor-pointer transition-colors"
+              >
+                回到今日
+              </button>
+            )}
             <div className="text-xs text-[#7C7A72] flex items-center gap-2">
-              <span className="font-semibold text-[#1F2421]">{DAY_OF_WEEK_LABELS[dayOfWeek]}</span>
+              <span
+                className={`font-semibold ${isWeekend ? 'text-[#9A5B13]' : 'text-[#1F2421]'}`}
+              >
+                {selectedWeekdayLabel}
+              </span>
               <span aria-hidden="true">·</span>
               <span className="font-mono-num">
                 {currentPeriodBell?.label}（{currentPeriodBell?.start}–{currentPeriodBell?.end}）
@@ -332,6 +352,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             );
           })}
         </div>
+
+        {isWeekend && (
+          <div className="bg-[#FDF4E6] border border-[#E9D1AE] rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-[#8F5312]">
+            <span>
+              {selectedDate}（{selectedWeekdayLabel}）為週末非上課日，當日無表定排課。如需查閱平日巡堂狀況，請選擇週一至週五日期或切換至最近上課日。
+            </span>
+            <button
+              type="button"
+              onClick={() => onChangeDate(latestSchoolDate)}
+              className="shrink-0 px-3 py-1.5 rounded-lg bg-[#9A5B13] hover:bg-[#7D490E] text-white font-semibold cursor-pointer transition-colors"
+            >
+              跳至最近上課日（{latestSchoolDate}）
+            </button>
+          </div>
+        )}
       </section>
 
       {/* 4-Column KPI Summary Strip */}
@@ -460,7 +495,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div>
               <h3 className="text-base font-bold text-[#1F2421]">今日巡堂 8 項檢核結果統計</h3>
               <p className="text-xs text-[#7C7A72] mt-0.5">
-                {selectedDate} · {DAY_OF_WEEK_LABELS[dayOfWeek]}（綠色為教學正常指標、紅橘色為待改善指標）
+                {selectedDate} · {selectedWeekdayLabel}（綠色為教學正常指標、紅橘色為待改善指標）
               </p>
             </div>
             <span className="text-xs text-[#7C7A72] font-mono-num">

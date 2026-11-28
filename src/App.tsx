@@ -7,6 +7,7 @@ import {
 } from 'firebase/auth';
 import { doc, onSnapshot, query, where } from 'firebase/firestore';
 import {
+  Activity,
   AlertTriangle,
   Bell,
   BookOpen,
@@ -14,6 +15,8 @@ import {
   Check,
   ClipboardCheck,
   FileText,
+  HelpCircle,
+  History,
   LayoutDashboard,
   UserRound,
   X,
@@ -21,10 +24,9 @@ import {
 import {
   BOOTSTRAP_ADMIN_EMAIL,
   CAMPUS_ID,
-  DAY_OF_WEEK_LABELS,
   DEFAULT_SCHOOL_SETTINGS,
   detectCurrentPeriod,
-  getDayOfWeekFromDate,
+  getDayOfWeekLabel,
   getTodayDateString,
   INCIDENT_SEVERITY_LABELS,
   normalizeStaffRole,
@@ -39,6 +41,7 @@ import {
   type TimetableArchive,
   type TimetableSlot,
 } from './types/patrol';
+import { CURRENT_APP_DATE, CURRENT_APP_VERSION } from './data/changelog';
 import {
   auth,
   db,
@@ -60,6 +63,11 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { AccessBlockedScreen, SignInScreen } from './components/SignInScreen';
 import { OfflineBanner, PWAInstallButton } from './components/PWAInstallButton';
 
+const OverviewDashboardView = lazy(() =>
+  import('./components/OverviewDashboardView').then((m) => ({
+    default: m.OverviewDashboardView,
+  }))
+);
 const DashboardView = lazy(() =>
   import('./components/DashboardView').then((m) => ({ default: m.DashboardView }))
 );
@@ -80,6 +88,12 @@ const ReportsView = lazy(() =>
 );
 const StaffView = lazy(() =>
   import('./components/StaffView').then((m) => ({ default: m.StaffView }))
+);
+const ManualView = lazy(() =>
+  import('./components/ManualView').then((m) => ({ default: m.ManualView }))
+);
+const ChangelogView = lazy(() =>
+  import('./components/ChangelogView').then((m) => ({ default: m.ChangelogView }))
 );
 
 interface SidebarNavItem {
@@ -129,12 +143,39 @@ function CampusPatrolApp() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [avatarFailed, setAvatarFailed] = useState(false);
 
-  // Navigation & Shared Time Context
-  const [activeNav, setActiveNav] = useState<NavSection>('dashboard');
+  // Navigation & Shared Time Context (always defaults to live current date & period)
+  const [activeNav, setActiveNav] = useState<NavSection>('overview');
   const [selectedDate, setSelectedDate] = useState<string>(getTodayDateString);
   const [selectedPeriod, setSelectedPeriod] = useState<number>(detectCurrentPeriod);
   const [selectedBuilding, setSelectedBuilding] = useState<string>('ALL');
   const [quickPatrolSlot, setQuickPatrolSlot] = useState<TimetableSlot | null>(null);
+  const datePinnedByUserRef = useRef(false);
+
+  const handleSelectDate = useCallback((nextDate: string) => {
+    if (!nextDate) return;
+    setSelectedDate(nextDate);
+    datePinnedByUserRef.current = nextDate !== getTodayDateString();
+  }, []);
+
+  // Automatically keep patrol date synced with the real system clock across midnight or tab wake-up
+  useEffect(() => {
+    const syncLiveDateIfUnpinned = () => {
+      if (datePinnedByUserRef.current) return;
+      const latestToday = getTodayDateString();
+      setSelectedDate((prev) => (prev === latestToday ? prev : latestToday));
+    };
+    const interval = window.setInterval(syncLiveDateIfUnpinned, 60_000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        syncLiveDateIfUnpinned();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
 
   // Real-time Firestore Collections
   const [schoolSettings, setSchoolSettings] = useState<SchoolSettings>(DEFAULT_SCHOOL_SETTINGS);
@@ -517,13 +558,29 @@ function CampusPatrolApp() {
   const sidebarGroups: SidebarNavGroup[] = useMemo(
     () => [
       {
+        title: '總覽',
+        items: [
+          {
+            key: 'overview',
+            nav: 'overview',
+            label: '總覽儀表',
+            icon: LayoutDashboard,
+            badgeBg: 'bg-[#E5F2EE]',
+            badgeText: 'text-[#1E5C4B]',
+            activeRowBg: 'bg-[#E5F2EE]',
+            activeText: 'text-[#1E5C4B]',
+            activeBadgeBg: 'bg-[#1E5C4B]',
+          },
+        ],
+      },
+      {
         title: '巡堂與即時',
         items: [
           {
             key: 'dashboard',
             nav: 'dashboard',
-            label: '即時巡堂儀表板',
-            icon: LayoutDashboard,
+            label: '即時巡堂',
+            icon: Activity,
             badgeBg: 'bg-[#EEEAF8]',
             badgeText: 'text-[#4D358A]',
             activeRowBg: 'bg-[#EEEAF8]',
@@ -533,7 +590,7 @@ function CampusPatrolApp() {
           {
             key: 'patrol',
             nav: 'patrol',
-            label: '行動巡堂作業',
+            label: '行動巡堂',
             icon: ClipboardCheck,
             badgeBg: 'bg-[#E5F2EE]',
             badgeText: 'text-[#1E5C4B]',
@@ -544,7 +601,7 @@ function CampusPatrolApp() {
           {
             key: 'incidents',
             nav: 'incidents',
-            label: '異常事件通報',
+            label: '異常通報',
             icon: Bell,
             badgeBg: 'bg-[#FCEBE7]',
             badgeText: 'text-[#B8432E]',
@@ -560,7 +617,7 @@ function CampusPatrolApp() {
           {
             key: 'basic_data',
             nav: 'basic_data',
-            label: '學校與樓棟設定',
+            label: '學校設定',
             icon: Building2,
             badgeBg: 'bg-[#FBF0E2]',
             badgeText: 'text-[#9A5B13]',
@@ -571,7 +628,7 @@ function CampusPatrolApp() {
           {
             key: 'timetable',
             nav: 'timetable',
-            label: '班級課表管理',
+            label: '班級課表',
             icon: BookOpen,
             badgeBg: 'bg-[#E7F0F8]',
             badgeText: 'text-[#245A84]',
@@ -587,7 +644,7 @@ function CampusPatrolApp() {
           {
             key: 'reports',
             nav: 'reports',
-            label: '巡堂報表匯出',
+            label: '報表匯出',
             icon: FileText,
             badgeBg: 'bg-[#E9ECF7]',
             badgeText: 'text-[#354488]',
@@ -606,6 +663,28 @@ function CampusPatrolApp() {
             activeText: 'text-[#5F2230]',
             activeBadgeBg: 'bg-[#5F2230]',
           },
+          {
+            key: 'manual',
+            nav: 'manual',
+            label: '操作手冊',
+            icon: HelpCircle,
+            badgeBg: 'bg-[#E5F2EE]',
+            badgeText: 'text-[#1E5C4B]',
+            activeRowBg: 'bg-[#E5F2EE]',
+            activeText: 'text-[#1E5C4B]',
+            activeBadgeBg: 'bg-[#1E5C4B]',
+          },
+          {
+            key: 'changelog',
+            nav: 'changelog',
+            label: '系統日誌',
+            icon: History,
+            badgeBg: 'bg-[#EFECE6]',
+            badgeText: 'text-[#4C4B46]',
+            activeRowBg: 'bg-[#EFECE6]',
+            activeText: 'text-[#2F2E2A]',
+            activeBadgeBg: 'bg-[#4C4B46]',
+          },
         ],
       },
     ],
@@ -614,10 +693,10 @@ function CampusPatrolApp() {
 
   const mobileNavItems: MobileNavItem[] = useMemo(
     () => [
-      { id: 'dashboard', label: '儀表板', icon: LayoutDashboard },
+      { id: 'overview', label: '總覽', icon: LayoutDashboard },
+      { id: 'dashboard', label: '即時', icon: Activity },
       { id: 'patrol', label: '巡堂', icon: ClipboardCheck },
       { id: 'incidents', label: '通報', icon: Bell },
-      { id: 'basic_data', label: '基本資料', icon: Building2 },
       { id: 'reports', label: '報表', icon: FileText },
       { id: 'staff', label: '帳號', icon: UserRound },
     ],
@@ -635,7 +714,7 @@ function CampusPatrolApp() {
   );
 
   const quickPeriods = useMemo(() => getQuickPeriodsWindow(selectedPeriod), [selectedPeriod]);
-  const selectedDayLabel = DAY_OF_WEEK_LABELS[getDayOfWeekFromDate(selectedDate)];
+  const selectedDayLabel = getDayOfWeekLabel(selectedDate);
 
   if (accessState === 'loading') {
     return (
@@ -681,7 +760,7 @@ function CampusPatrolApp() {
         <div className="flex items-center gap-3 sm:gap-4 min-w-0">
           <button
             type="button"
-            onClick={() => setActiveNav('dashboard')}
+            onClick={() => setActiveNav('overview')}
             className="flex items-center gap-2.5 sm:gap-3 text-left group cursor-pointer shrink-0"
           >
             <span className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-[#1E5C4B] flex items-center justify-center shrink-0">
@@ -709,7 +788,7 @@ function CampusPatrolApp() {
             <button
               type="button"
               onClick={() => setActiveNav('basic_data')}
-              title="前往基本資料管理學年度與課表歷史歸檔"
+              title="前往學校設定管理學年度與課表歷史歸檔"
               className="hidden xl:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg hover:bg-[#F2EFE9] text-xs text-[#5C615C] hover:text-[#1E5C4B] font-mono-num whitespace-nowrap cursor-pointer transition-colors"
             >
               <span className="font-semibold">
@@ -825,7 +904,7 @@ function CampusPatrolApp() {
                       key={item.key}
                       type="button"
                       onClick={() => setActiveNav(item.nav)}
-                      className={`w-full min-h-[44px] px-2.5 py-1.5 rounded-xl text-[14px] flex items-center justify-between gap-2 transition-colors cursor-pointer whitespace-nowrap ${
+                      className={`w-full min-h-[42px] px-2.5 py-1.5 rounded-xl text-[14px] flex items-center justify-between gap-2 transition-colors cursor-pointer whitespace-nowrap ${
                         active
                           ? `${item.activeRowBg} ${item.activeText} font-bold`
                           : 'text-[#3A3F3B] font-medium hover:bg-[#F2EFE9]'
@@ -860,12 +939,17 @@ function CampusPatrolApp() {
             ))}
           </nav>
 
-          {/* Quiet Sidebar Footer with PWA Install Action */}
-          <div className="px-4 py-3.5 border-t border-[#E5E1D8] space-y-2.5">
+          {/* Quiet Sidebar Footer with PWA Install & System Version */}
+          <div className="px-4 py-3.5 border-t border-[#E5E1D8] space-y-2">
             <PWAInstallButton variant="sidebar" />
-            <p className="text-center text-xs text-[#9A968C]">
-              {profile.department} · {profile.jobTitle}
-            </p>
+            <button
+              type="button"
+              onClick={() => setActiveNav('changelog')}
+              className="w-full text-center text-xs text-[#9A968C] hover:text-[#1E5C4B] transition-colors cursor-pointer font-mono-num"
+              title="點擊檢視系統日誌"
+            >
+              系統版本 {CURRENT_APP_VERSION} · {CURRENT_APP_DATE}
+            </button>
           </div>
         </aside>
 
@@ -935,13 +1019,35 @@ function CampusPatrolApp() {
                 </div>
               }
             >
+            {activeNav === 'overview' && (
+              <OverviewDashboardView
+                profile={profile}
+                isAdmin={isAdmin}
+                schoolSettings={schoolSettings}
+                timetables={timetables}
+                timetableArchives={timetableArchives}
+                patrolLogs={patrolLogs}
+                incidents={incidents}
+                allowedAccounts={allowedAccounts}
+                staffList={staffList}
+                onNavigate={setActiveNav}
+                onJumpToBuildingLive={(building, targetDate) => {
+                  setSelectedBuilding(building);
+                  if (targetDate) {
+                    handleSelectDate(targetDate);
+                  }
+                  setActiveNav('dashboard');
+                }}
+              />
+            )}
+
             {activeNav === 'dashboard' && (
               <DashboardView
                 schoolSettings={schoolSettings}
                 selectedDate={selectedDate}
                 selectedPeriod={selectedPeriod}
                 selectedBuilding={selectedBuilding}
-                onChangeDate={setSelectedDate}
+                onChangeDate={handleSelectDate}
                 onChangePeriod={setSelectedPeriod}
                 onChangeBuilding={setSelectedBuilding}
                 timetables={timetables}
@@ -964,7 +1070,7 @@ function CampusPatrolApp() {
                 schoolSettings={schoolSettings}
                 selectedDate={selectedDate}
                 selectedPeriod={selectedPeriod}
-                onChangeDate={setSelectedDate}
+                onChangeDate={handleSelectDate}
                 onChangePeriod={setSelectedPeriod}
                 timetables={timetables}
                 patrolLogs={patrolLogs}
@@ -1027,7 +1133,7 @@ function CampusPatrolApp() {
                   const y = targetDate.getFullYear();
                   const m = String(targetDate.getMonth() + 1).padStart(2, '0');
                   const d = String(targetDate.getDate()).padStart(2, '0');
-                  setSelectedDate(`${y}-${m}-${d}`);
+                  handleSelectDate(`${y}-${m}-${d}`);
                   setSelectedPeriod(targetPeriod);
                   setQuickPatrolSlot(slot ?? null);
                   setActiveNav('patrol');
@@ -1060,6 +1166,12 @@ function CampusPatrolApp() {
                 onActionFeedback={showFeedback}
               />
             )}
+
+            {activeNav === 'manual' && (
+              <ManualView schoolSettings={schoolSettings} onNavigate={setActiveNav} />
+            )}
+
+            {activeNav === 'changelog' && <ChangelogView />}
             </Suspense>
           </main>
         </div>
