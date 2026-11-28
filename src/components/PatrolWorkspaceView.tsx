@@ -28,8 +28,12 @@ import {
   PATROL_STATUS_LABELS,
   PERIOD_SCHEDULE,
   deriveStatusFromChecklist,
-  getDayOfWeekFromDate,
+  getCalendarDayOfWeek,
+  getDayOfWeekLabel,
   getEffectiveChecklist,
+  getLatestSchoolDateString,
+  getTodayDateString,
+  isWeekendDate,
 } from '../types/patrol';
 import { createIncidentReport, savePatrolLog } from '../lib/firestoreOps';
 
@@ -80,7 +84,11 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'done'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const dayOfWeek = getDayOfWeekFromDate(selectedDate);
+  const calendarDayOfWeek = getCalendarDayOfWeek(selectedDate);
+  const selectedWeekdayLabel = getDayOfWeekLabel(selectedDate);
+  const isWeekend = isWeekendDate(selectedDate);
+  const todayStr = getTodayDateString();
+  const latestSchoolDate = getLatestSchoolDateString(selectedDate);
 
   const buildings = useMemo(() => {
     const ordered = [...schoolSettings.buildings];
@@ -110,7 +118,7 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
   const filteredSlots = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return timetables
-      .filter((t) => t.dayOfWeek === dayOfWeek && t.period === selectedPeriod)
+      .filter((t) => t.dayOfWeek === calendarDayOfWeek && t.period === selectedPeriod)
       .filter((t) => buildingFilter === 'ALL' || t.building === buildingFilter)
       .filter((t) => {
         const logged = periodLogsBySlot.has(t.id);
@@ -135,7 +143,7 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
       );
   }, [
     timetables,
-    dayOfWeek,
+    calendarDayOfWeek,
     selectedPeriod,
     buildingFilter,
     statusFilter,
@@ -151,7 +159,7 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
           <div>
             <h2 className="text-base font-bold text-[#1F2421]">即時行動巡堂作業</h2>
             <p className="text-xs text-[#7C7A72] mt-0.5">
-              {selectedDate} · {DAY_OF_WEEK_LABELS[dayOfWeek]} · 點擊班級卡片即可勾選巡堂檢核項目與備註
+              {selectedDate} · {selectedWeekdayLabel} · 點擊班級卡片即可勾選巡堂檢核項目與備註
             </p>
           </div>
           <div className="relative w-full sm:w-64">
@@ -170,7 +178,7 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-2.5 pt-1">
           <div className="inline-flex items-center gap-1 p-1 bg-[#F2EFE9] rounded-xl overflow-x-auto">
             {[1, 2, 3, 4, 5].map((d) => {
-              const active = dayOfWeek === d;
+              const active = calendarDayOfWeek === d;
               return (
                 <button
                   key={d}
@@ -187,14 +195,40 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
               );
             })}
           </div>
-          <input
-            type="date"
-            value={selectedDate}
-            onChange={(e) => e.target.value && onChangeDate(e.target.value)}
-            aria-label="選擇巡堂日期"
-            className="min-h-[36px] px-3 py-1 text-xs font-mono-num bg-[#FAF9F5] border border-[#E5E1D8] rounded-xl text-[#1F2421] focus:outline-none focus:border-[#1E5C4B]"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => e.target.value && onChangeDate(e.target.value)}
+              aria-label="選擇巡堂日期"
+              className="min-h-[36px] px-3 py-1 text-xs font-mono-num bg-[#FAF9F5] border border-[#E5E1D8] rounded-xl text-[#1F2421] focus:outline-none focus:border-[#1E5C4B]"
+            />
+            {selectedDate !== todayStr && (
+              <button
+                type="button"
+                onClick={() => onChangeDate(todayStr)}
+                className="min-h-[36px] px-3 py-1 text-xs font-semibold rounded-xl bg-[#E5F2EE] hover:bg-[#D5EAE3] text-[#1E5C4B] whitespace-nowrap cursor-pointer transition-colors"
+              >
+                回到今日
+              </button>
+            )}
+          </div>
         </div>
+
+        {isWeekend && (
+          <div className="bg-[#FDF4E6] border border-[#E9D1AE] rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-[#8F5312]">
+            <span>
+              {selectedDate}（{selectedWeekdayLabel}）為週末非上課日，無表定排課。如需檢視或補登平日巡堂，請點擊上方星期一～五或跳至最近上課日。
+            </span>
+            <button
+              type="button"
+              onClick={() => onChangeDate(latestSchoolDate)}
+              className="shrink-0 px-3 py-1.5 rounded-lg bg-[#9A5B13] hover:bg-[#7D490E] text-white font-semibold cursor-pointer transition-colors"
+            >
+              跳至最近上課日（{latestSchoolDate}）
+            </button>
+          </div>
+        )}
 
         {/* Period Bar */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">

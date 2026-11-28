@@ -29,13 +29,16 @@ export type IncidentSeverity = 'low' | 'medium' | 'high';
 export type IncidentStatus = 'open' | 'in_progress' | 'resolved';
 
 export type NavSection =
+  | 'overview'
   | 'dashboard'
   | 'patrol'
   | 'incidents'
   | 'basic_data'
   | 'timetable'
   | 'reports'
-  | 'staff';
+  | 'staff'
+  | 'manual'
+  | 'changelog';
 
 export interface SchoolSettings {
   campusId: typeof CAMPUS_ID;
@@ -367,14 +370,107 @@ export function getEffectiveChecklist(log: PatrolLog | null | undefined): Patrol
   return derived;
 }
 
-export function getTodayDateString(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+export const FULL_DAY_OF_WEEK_LABELS: Record<number, string> = {
+  0: '星期日',
+  1: '星期一',
+  2: '星期二',
+  3: '星期三',
+  4: '星期四',
+  5: '星期五',
+  6: '星期六',
+};
+
+export const FULL_DAY_OF_WEEK_SHORT: Record<number, string> = {
+  0: '日',
+  1: '一',
+  2: '二',
+  3: '三',
+  4: '四',
+  5: '五',
+  6: '六',
+};
+
+function formatDateLocal(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
+export function parseLocalDate(dateStr: string): Date {
+  const parts = dateStr.split('-').map(Number);
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return new Date();
+  return new Date(parts[0], parts[1] - 1, parts[2]);
+}
+
+export function getTodayDateString(): string {
+  return formatDateLocal(new Date());
+}
+
+/**
+ * Returns the true calendar day of week (0 = Sunday .. 6 = Saturday) for YYYY-MM-DD.
+ */
+export function getCalendarDayOfWeek(dateStr: string): number {
+  const parts = dateStr.split('-').map(Number);
+  if (parts.length !== 3 || parts.some(Number.isNaN)) {
+    return new Date().getDay();
+  }
+  return new Date(parts[0], parts[1] - 1, parts[2]).getDay();
+}
+
+export function getDayOfWeekLabel(dateStr: string): string {
+  return FULL_DAY_OF_WEEK_LABELS[getCalendarDayOfWeek(dateStr)] ?? '星期一';
+}
+
+export function isWeekendDate(dateStr: string): boolean {
+  const day = getCalendarDayOfWeek(dateStr);
+  return day === 0 || day === 6;
+}
+
+/**
+ * Returns the date itself if Mon–Fri, or the most recent Friday if Sat/Sun.
+ */
+export function getLatestSchoolDateString(fromDateStr?: string): string {
+  const base = fromDateStr ? parseLocalDate(fromDateStr) : new Date();
+  const day = base.getDay();
+  if (day === 6) {
+    return formatDateLocal(new Date(base.getFullYear(), base.getMonth(), base.getDate() - 1));
+  }
+  if (day === 0) {
+    return formatDateLocal(new Date(base.getFullYear(), base.getMonth(), base.getDate() - 2));
+  }
+  return formatDateLocal(base);
+}
+
+/**
+ * Returns the Mon–Fri date range for the week containing dateStr.
+ */
+export function getWeekDateRange(dateStr: string): {
+  monday: string;
+  friday: string;
+  dates: string[];
+} {
+  const base = parseLocalDate(dateStr);
+  const jsDay = base.getDay();
+  const offsetToMonday = jsDay === 0 ? -6 : 1 - jsDay;
+  const mondayDate = new Date(base.getFullYear(), base.getMonth(), base.getDate() + offsetToMonday);
+  const dates = Array.from({ length: 5 }, (_, idx) =>
+    formatDateLocal(
+      new Date(mondayDate.getFullYear(), mondayDate.getMonth(), mondayDate.getDate() + idx)
+    )
+  );
+  return {
+    monday: dates[0],
+    friday: dates[4],
+    dates,
+  };
+}
+
+/**
+ * Returns school timetable day index (1..5), mapping Sat/Sun to 1 for legacy callers
+ * that require a valid Mon–Fri timetable index (e.g. demo seed generation).
+ * For UI weekday display or filtering live schedules, use getCalendarDayOfWeek / getDayOfWeekLabel.
+ */
 export function getDayOfWeekFromDate(dateStr: string): number {
   const parts = dateStr.split('-').map(Number);
   if (parts.length !== 3 || parts.some(Number.isNaN)) return 1;
