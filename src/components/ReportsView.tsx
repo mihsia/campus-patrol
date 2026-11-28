@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { FileDown, FileSpreadsheet, Printer } from 'lucide-react';
+import { BookOpen, Check, ClipboardList, FileDown, FileSpreadsheet, Printer } from 'lucide-react';
 import type {
   IncidentReport,
   PatrolCheckItem,
@@ -12,11 +12,16 @@ import {
   INCIDENT_CATEGORY_LABELS,
   INCIDENT_SEVERITY_LABELS,
   INCIDENT_STATUS_LABELS,
+  PERIOD_SCHEDULE,
+  getAcademicYearPeriod,
 } from '../types/patrol';
 import {
   buildPatrolReportRows,
+  exportClassTimetablesWordDocx,
   exportPatrolExcelWorkbook,
   exportPatrolWordDocx,
+  groupTimetablesByClass,
+  printClassTimetablesPdf,
 } from '../lib/exportReports';
 
 interface ReportsViewProps {
@@ -29,6 +34,7 @@ interface ReportsViewProps {
 }
 
 type ReportMode = 'weekly_standard' | 'logged_only';
+type ReportTab = 'patrol_record' | 'class_timetable';
 
 export const ReportsView: React.FC<ReportsViewProps> = ({
   schoolSettings,
@@ -38,6 +44,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   incidents,
   onActionFeedback,
 }) => {
+  const [reportTab, setReportTab] = useState<ReportTab>('patrol_record');
   const [schoolName, setSchoolName] = useState(schoolSettings.schoolName);
   const [academicYear, setAcademicYear] = useState(schoolSettings.academicYear);
   const [semester, setSemester] = useState<SemesterType>(schoolSettings.semester);
@@ -48,6 +55,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const [reportMode, setReportMode] = useState<ReportMode>('weekly_standard');
   const [includeIncidentsAppendix, setIncludeIncidentsAppendix] = useState(false);
   const [exportingWord, setExportingWord] = useState(false);
+
+  // Class timetable export selection state
+  const [selectedTimetableClasses, setSelectedTimetableClasses] = useState<string[]>([]);
+  const [exportingClassWord, setExportingClassWord] = useState(false);
 
   // Sync defaults when schoolSettings updates from Firestore
   useEffect(() => {
@@ -66,6 +77,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     });
     return ['ALL', ...ordered];
   }, [schoolSettings.buildings, timetables]);
+
+  const allClassGroups = useMemo(() => groupTimetablesByClass(timetables), [timetables]);
+
+  const activeTimetableGroups = useMemo(() => {
+    if (selectedTimetableClasses.length === 0) return allClassGroups;
+    const set = new Set(selectedTimetableClasses);
+    return allClassGroups.filter((g) => set.has(g.className));
+  }, [allClassGroups, selectedTimetableClasses]);
 
   const filteredTimetables = useMemo(() => {
     return timetables.filter((t) => buildingFilter === 'ALL' || t.building === buildingFilter);
@@ -102,6 +121,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       currentWeek: typeof weekNumber === 'number' ? weekNumber : schoolSettings.currentWeek,
     }),
     [schoolSettings, schoolName, academicYear, semester, weekNumber]
+  );
+
+  const effectiveYearInfo = useMemo(
+    () => getAcademicYearPeriod(effectiveSettings.academicYear),
+    [effectiveSettings.academicYear]
   );
 
   const handleExportWord = async () => {
@@ -143,6 +167,57 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     }
   };
 
+  const handleExportTimetableWord = async () => {
+    setExportingClassWord(true);
+    try {
+      const targetNames =
+        selectedTimetableClasses.length > 0 ? selectedTimetableClasses : undefined;
+      const count = await exportClassTimetablesWordDocx({
+        schoolSettings: effectiveSettings,
+        timetables,
+        selectedClassNames: targetNames,
+      });
+      onActionFeedback(
+        count === 1
+          ? `已下載「${activeTimetableGroups[0]?.className}」日課表 Word（.docx）`
+          : `已下載 ${count} 個班級日課表 Word（.docx，每班一頁）`
+      );
+    } catch (err) {
+      onActionFeedback(
+        `課表 Word 匯出失敗：${err instanceof Error ? err.message : '請稍後再試'}`
+      );
+    } finally {
+      setExportingClassWord(false);
+    }
+  };
+
+  const handlePrintTimetablePdf = () => {
+    try {
+      const targetNames =
+        selectedTimetableClasses.length > 0 ? selectedTimetableClasses : undefined;
+      const count = printClassTimetablesPdf({
+        schoolSettings: effectiveSettings,
+        timetables,
+        selectedClassNames: targetNames,
+      });
+      onActionFeedback(
+        count === 1
+          ? `已開啟「${activeTimetableGroups[0]?.className}」日課表 PDF 列印視窗`
+          : `已開啟 ${count} 個班級日課表 PDF 列印視窗（每班一頁）`
+      );
+    } catch (err) {
+      onActionFeedback(
+        `課表 PDF 列印失敗：${err instanceof Error ? err.message : '請稍後再試'}`
+      );
+    }
+  };
+
+  const toggleClassSelection = (className: string) => {
+    setSelectedTimetableClasses((prev) =>
+      prev.includes(className) ? prev.filter((c) => c !== className) : [...prev, className]
+    );
+  };
+
   const handlePrintPdf = () => {
     window.print();
   };
@@ -155,6 +230,210 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Report Type Switcher (Hidden when printing) */}
+      <div className="no-print inline-flex items-center gap-1 p-1 bg-[#EAE6DC] rounded-xl">
+        <button
+          type="button"
+          onClick={() => setReportTab('patrol_record')}
+          className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors ${
+            reportTab === 'patrol_record'
+              ? 'bg-[#1E5C4B] text-white shadow-xs'
+              : 'text-[#5C615C] hover:text-[#1F2421]'
+          }`}
+        >
+          <ClipboardList className="w-4 h-4" />
+          巡堂紀錄報表
+        </button>
+        <button
+          type="button"
+          onClick={() => setReportTab('class_timetable')}
+          className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors ${
+            reportTab === 'class_timetable'
+              ? 'bg-[#1E5C4B] text-white shadow-xs'
+              : 'text-[#5C615C] hover:text-[#1F2421]'
+          }`}
+        >
+          <BookOpen className="w-4 h-4" />
+          各班級日課表（Word / PDF）
+        </button>
+      </div>
+
+      {reportTab === 'class_timetable' ? (
+        <div className="space-y-6">
+          <div className="no-print bg-white border border-[#E5E1D8] rounded-2xl p-5 space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-base font-bold text-[#1F2421]">
+                  各班級日課表匯出（Word / PDF）
+                </h2>
+                <p className="text-xs text-[#7C7A72] mt-0.5">
+                  {effectiveSettings.schoolName} · {effectiveYearInfo.fullLabel} · 每班自動獨立分頁排版，可直接張貼教室門口或留存教務處
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={exportingClassWord || activeTimetableGroups.length === 0}
+                  onClick={handleExportTimetableWord}
+                  className="min-h-[42px] px-4 py-2 bg-[#1E5C4B] hover:bg-[#16473A] disabled:opacity-50 text-white text-xs sm:text-sm font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors"
+                >
+                  <FileDown className="w-4 h-4" />
+                  {exportingClassWord
+                    ? '產生 Word 中...'
+                    : `下載 Word（${activeTimetableGroups.length} 班）`}
+                </button>
+                <button
+                  type="button"
+                  disabled={activeTimetableGroups.length === 0}
+                  onClick={handlePrintTimetablePdf}
+                  className="min-h-[42px] px-4 py-2 bg-[#1F2421] hover:bg-[#313834] disabled:opacity-50 text-white text-xs sm:text-sm font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors"
+                >
+                  <Printer className="w-4 h-4" />
+                  列印／另存 PDF（{activeTimetableGroups.length} 班）
+                </button>
+              </div>
+            </div>
+
+            {allClassGroups.length === 0 ? (
+              <div className="p-6 text-center text-sm text-[#7C7A72] border border-dashed border-[#DDD8CD] rounded-xl">
+                尚未建立班級課表資料，請先至「班級課表」匯入或新增課表。
+              </div>
+            ) : (
+              <div className="space-y-2.5 pt-3 border-t border-[#F0ECE3]">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="font-semibold text-[#3A3F3B]">
+                    選擇要匯出的班級（未勾選時預設匯出全校 {allClassGroups.length} 個班級）：
+                  </span>
+                  {selectedTimetableClasses.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTimetableClasses([])}
+                      className="text-[#1E5C4B] font-semibold hover:underline cursor-pointer"
+                    >
+                      重設為全校所有班級
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {allClassGroups.map((group) => {
+                    const checked = selectedTimetableClasses.includes(group.className);
+                    return (
+                      <button
+                        key={group.className}
+                        type="button"
+                        onClick={() => toggleClassSelection(group.className)}
+                        className={`min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-semibold border inline-flex items-center gap-1.5 cursor-pointer transition-colors ${
+                          checked
+                            ? 'bg-[#E5F2EE] border-[#1E5C4B] text-[#1E5C4B]'
+                            : 'bg-[#FAF9F5] border-[#E5E1D8] text-[#3A3F3B] hover:bg-[#F2EFE9]'
+                        }`}
+                      >
+                        {checked && <Check className="w-3.5 h-3.5" />}
+                        <span>{group.className}</span>
+                        <span className="font-mono-num opacity-70">({group.slots.length}節)</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Live Preview of Selected Class Timetables */}
+          {activeTimetableGroups.length > 0 && (
+            <div className="space-y-6">
+              {activeTimetableGroups.map((group) => {
+                const slotMap = new Map<string, TimetableSlot[]>();
+                group.slots.forEach((s) => {
+                  const key = `${s.dayOfWeek}-${s.period}`;
+                  const list = slotMap.get(key) || [];
+                  list.push(s);
+                  slotMap.set(key, list);
+                });
+
+                return (
+                  <article
+                    key={group.className}
+                    className="bg-white border border-[#E5E1D8] rounded-2xl p-5 sm:p-7 space-y-4"
+                  >
+                    <div className="text-center space-y-1">
+                      <h3 className="text-lg font-bold text-[#1F2421]">
+                        {effectiveSettings.schoolName} {effectiveYearInfo.academicYear} 學年度{' '}
+                        {group.className} 日課表
+                      </h3>
+                      <p className="text-xs text-[#5C615C] font-mono-num">
+                        學年度期間：{effectiveYearInfo.rangeText} ｜ 教室：{group.building}{' '}
+                        {group.floor} {group.roomNumber} ｜ 排課總計：{group.slots.length} 節
+                      </p>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[640px] border-collapse border border-black text-xs text-center">
+                        <thead>
+                          <tr className="bg-[#E8F1EE]">
+                            <th className="border border-black py-2 px-2 w-[16%] font-bold">
+                              節次／時間
+                            </th>
+                            {['星期一', '星期二', '星期三', '星期四', '星期五'].map((label) => (
+                              <th key={label} className="border border-black py-2 px-2 font-bold">
+                                {label}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {PERIOD_SCHEDULE.filter((p) => p.period <= group.maxPeriod).map((p) => (
+                            <tr key={p.period}>
+                              <th className="border border-black py-2 px-2 bg-[#FAF9F5] font-semibold">
+                                <div>{p.label}</div>
+                                <div className="text-[10px] font-mono-num font-normal text-[#5C615C]">
+                                  {p.start}–{p.end}
+                                </div>
+                              </th>
+                              {[1, 2, 3, 4, 5].map((dow) => {
+                                const items = slotMap.get(`${dow}-${p.period}`) || [];
+                                return (
+                                  <td
+                                    key={dow}
+                                    className="border border-black py-2 px-1.5 align-middle"
+                                  >
+                                    {items.length === 0 ? (
+                                      <span className="text-[#9A968C]">—</span>
+                                    ) : (
+                                      <div className="space-y-1">
+                                        {items.map((slot) => (
+                                          <div key={slot.id}>
+                                            <div className="font-bold text-[#1F2421]">
+                                              {slot.subject}
+                                            </div>
+                                            <div className="text-[11px] text-[#5C615C]">
+                                              {slot.teacherName}
+                                            </div>
+                                            {slot.isRelocated && slot.locationNote && (
+                                              <div className="text-[10px] text-[#245A84]">
+                                                ({slot.locationNote})
+                                              </div>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : (
+      <>
       {/* Export Control Bar (Hidden when printing PDF) */}
       <div className="no-print bg-white border border-[#E5E1D8] rounded-2xl p-5 space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -487,6 +766,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           )}
         </div>
       </article>
+      </>
+      )}
     </div>
   );
 };

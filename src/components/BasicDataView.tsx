@@ -31,6 +31,8 @@ import {
   DAY_OF_WEEK_SHORT,
   PERIOD_SCHEDULE,
   STANDARD_GRADES,
+  detectCurrentAcademicYear,
+  getAcademicYearPeriod,
 } from '../types/patrol';
 import {
   archiveCurrentTimetables,
@@ -238,6 +240,15 @@ export const BasicDataView: React.FC<BasicDataViewProps> = ({
     }
   };
 
+  const currentYearInfo = useMemo(
+    () => getAcademicYearPeriod(schoolSettings.academicYear),
+    [schoolSettings.academicYear]
+  );
+  const editingYearInfo = useMemo(
+    () => getAcademicYearPeriod(academicYear || schoolSettings.academicYear),
+    [academicYear, schoolSettings.academicYear]
+  );
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       {/* Page Title Header (Matching Reference School Basic Data Aesthetic) */}
@@ -245,7 +256,10 @@ export const BasicDataView: React.FC<BasicDataViewProps> = ({
         <div>
           <h1 className="text-2xl font-bold text-[#1F2421] tracking-tight">學校基本資料</h1>
           <p className="text-sm text-[#7C7A72] mt-1">
-            管理學校名稱、學年度學期與校舍各棟樓名稱 · {schoolSettings.academicYear} 學年度{schoolSettings.semester}
+            課表原則上以學年度為單位（本年度 8 月 1 日至隔年度 7 月 31 日止）·{' '}
+            <span className="font-mono-num text-[#1F2421] font-medium">
+              {currentYearInfo.fullLabel}
+            </span>
           </p>
         </div>
 
@@ -277,11 +291,11 @@ export const BasicDataView: React.FC<BasicDataViewProps> = ({
         <span>
           報表抬頭預覽：
           <strong className="text-[#1F2421] font-semibold ml-1">
-            {schoolName || schoolSettings.schoolName} {academicYear || schoolSettings.academicYear} 學年度{semester}第 {currentWeek} 週 巡堂紀錄表
+            {schoolName || schoolSettings.schoolName} {editingYearInfo.academicYear} 學年度{semester}第 {currentWeek} 週 巡堂紀錄表
           </strong>
         </span>
-        <span className="text-xs text-[#7C7A72] whitespace-nowrap">
-          {isAdmin ? '管理者可隨時更新設定' : '僅供檢視（修改限管理者）'}
+        <span className="text-xs text-[#7C7A72] whitespace-nowrap font-mono-num">
+          課表適用期間：{editingYearInfo.rangeText}
         </span>
       </div>
 
@@ -290,7 +304,7 @@ export const BasicDataView: React.FC<BasicDataViewProps> = ({
         <div className="space-y-6">
           {/* Card 1: School Overview (Clean 2-column label-over-bold-value matching Screenshot 1) */}
           <section className="space-y-2.5">
-            <h2 className="text-sm font-bold text-[#1F2421]">學校、學期與課務概況</h2>
+            <h2 className="text-sm font-bold text-[#1F2421]">學校、學年度與課務概況</h2>
             <div className="bg-white border border-[#E5E1D8] rounded-2xl p-6 sm:p-7 space-y-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-6">
                 <div>
@@ -298,9 +312,15 @@ export const BasicDataView: React.FC<BasicDataViewProps> = ({
                   <p className="text-xl font-bold text-[#1F2421] mt-1">{schoolSettings.schoolName}</p>
                 </div>
                 <div>
-                  <p className="text-xs font-medium text-[#7C7A72]">學年度與學期</p>
+                  <p className="text-xs font-medium text-[#7C7A72]">課表學年度（8/1 ～ 隔年 7/31）</p>
                   <p className="text-xl font-bold text-[#1F2421] mt-1 font-mono-num">
-                    {schoolSettings.academicYear} 學年度 {schoolSettings.semester}
+                    {currentYearInfo.academicYear} 學年度
+                    <span className="text-sm font-medium text-[#1E5C4B] ml-2">
+                      {schoolSettings.semester}
+                    </span>
+                  </p>
+                  <p className="text-xs text-[#7C7A72] mt-1 font-mono-num">
+                    適用期間：{currentYearInfo.rangeText}
                   </p>
                 </div>
                 <div>
@@ -557,13 +577,22 @@ export const BasicDataView: React.FC<BasicDataViewProps> = ({
             </div>
           )}
 
-          {/* Section 1: School Info & Academic Term */}
+          {/* Section 1: School Info & Academic Year */}
           <section className="bg-white border border-[#E5E1D8] rounded-2xl p-6 space-y-5">
-            <div>
-              <h2 className="text-base font-bold text-[#1F2421]">一、學校名稱與學期資訊</h2>
-              <p className="text-xs text-[#7C7A72] mt-0.5">
-                此處設定會自動套用於系統頂部標題及 Word／PDF 巡堂紀錄表抬頭
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h2 className="text-base font-bold text-[#1F2421]">一、學校名稱與學年度設定</h2>
+                <p className="text-xs text-[#7C7A72] mt-0.5">
+                  原則上課表以學年度為單位（本年度 8 月 1 日至隔年度 7 月 31 日止）；學期與週次供巡堂報表抬頭使用
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAcademicYear(detectCurrentAcademicYear())}
+                className="self-start sm:self-auto px-3 py-1.5 rounded-lg bg-[#E5F2EE] hover:bg-[#D5EAE3] text-[#1E5C4B] text-xs font-semibold cursor-pointer whitespace-nowrap"
+              >
+                自動帶入目前學年度（{detectCurrentAcademicYear()}）
+              </button>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -594,7 +623,7 @@ export const BasicDataView: React.FC<BasicDataViewProps> = ({
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-[#3A3F3B] block">學期</label>
+                  <label className="text-xs font-semibold text-[#3A3F3B] block">報表學期</label>
                   <select
                     value={semester}
                     onChange={(e) => setSemester(e.target.value as SemesterType)}
@@ -617,6 +646,16 @@ export const BasicDataView: React.FC<BasicDataViewProps> = ({
                   />
                 </div>
               </div>
+            </div>
+
+            <div className="bg-[#FAF9F5] border border-[#E5E1D8] rounded-xl px-4 py-2.5 text-xs text-[#5C615C] flex flex-wrap items-center justify-between gap-2">
+              <span>
+                課表有效學年度期間：
+                <strong className="font-mono-num text-[#1E5C4B] ml-1">
+                  {editingYearInfo.fullLabel}
+                </strong>
+              </span>
+              <span className="text-[#7C7A72]">每年 8 月 1 日起自動進入新學年度</span>
             </div>
           </section>
 

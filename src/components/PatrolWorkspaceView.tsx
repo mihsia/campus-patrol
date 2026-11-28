@@ -1,11 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  ArrowRight,
   Check,
   CheckCircle2,
   Clock,
   MapPin,
   Search,
+  Sparkles,
   X,
 } from 'lucide-react';
 import type {
@@ -25,6 +27,7 @@ import {
   PATROL_CHECKLIST_LABELS,
   PATROL_ISSUE_ITEMS,
   PATROL_POSITIVE_ITEMS,
+  PATROL_QUICK_NOTES,
   PATROL_STATUS_LABELS,
   PERIOD_SCHEDULE,
   deriveStatusFromChecklist,
@@ -36,6 +39,14 @@ import {
   isWeekendDate,
 } from '../types/patrol';
 import { createIncidentReport, savePatrolLog } from '../lib/firestoreOps';
+
+function parseFloorRank(floor: string): number {
+  const m = /(\d+)/.exec(floor || '');
+  if (!m) return 99;
+  const num = Number(m[1]);
+  if (/B/i.test(floor)) return -num;
+  return num;
+}
 
 interface PatrolWorkspaceViewProps {
   profile: StaffProfile;
@@ -83,6 +94,7 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
   const [buildingFilter, setBuildingFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'done'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [quickSavingSlotId, setQuickSavingSlotId] = useState<string | null>(null);
 
   const calendarDayOfWeek = getCalendarDayOfWeek(selectedDate);
   const selectedWeekdayLabel = getDayOfWeekLabel(selectedDate);
@@ -115,11 +127,22 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
     return map;
   }, [patrolLogs, selectedDate, selectedPeriod]);
 
-  const filteredSlots = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+  // All slots for current date/period/building (for progress bar & continuous patrol queue)
+  const buildingPeriodSlots = useMemo(() => {
     return timetables
       .filter((t) => t.dayOfWeek === calendarDayOfWeek && t.period === selectedPeriod)
       .filter((t) => buildingFilter === 'ALL' || t.building === buildingFilter)
+      .sort(
+        (a, b) =>
+          a.building.localeCompare(b.building, 'zh-Hant') ||
+          parseFloorRank(a.floor) - parseFloorRank(b.floor) ||
+          a.roomNumber.localeCompare(b.roomNumber, 'zh-Hant', { numeric: true })
+      );
+  }, [timetables, calendarDayOfWeek, selectedPeriod, buildingFilter]);
+
+  const filteredSlots = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return buildingPeriodSlots
       .filter((t) => {
         const logged = periodLogsBySlot.has(t.id);
         if (statusFilter === 'pending') return !logged;
@@ -135,21 +158,60 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
           t.teacherName.toLowerCase().includes(q) ||
           t.subject.toLowerCase().includes(q)
         );
-      })
-      .sort(
-        (a, b) =>
-          a.building.localeCompare(b.building, 'zh-Hant') ||
-          a.roomNumber.localeCompare(b.roomNumber)
+      });
+  }, [buildingPeriodSlots, statusFilter, searchQuery, periodLogsBySlot]);
+
+  const periodProgress = useMemo(() => {
+    const total = buildingPeriodSlots.length;
+    const done = buildingPeriodSlots.filter((s) => periodLogsBySlot.has(s.id)).length;
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    return { total, done, remaining: Math.max(0, total - done), pct };
+  }, [buildingPeriodSlots, periodLogsBySlot]);
+
+  const nextPendingSlot = useMemo(() => {
+    if (!activeSlot) return null;
+    const idx = buildingPeriodSlots.findIndex((s) => s.id === activeSlot.id);
+    const orderedCandidates =
+      idx >= 0
+        ? [...buildingPeriodSlots.slice(idx + 1), ...buildingPeriodSlots.slice(0, idx)]
+        : buildingPeriodSlots;
+    return orderedCandidates.find((s) => s.id !== activeSlot.id && !periodLogsBySlot.has(s.id)) ?? null;
+  }, [activeSlot, buildingPeriodSlots, periodLogsBySlot]);
+
+  const handleQuickTapSave = async (
+    slot: TimetableSlot,
+    preset: 'normal' | 'excellent'
+  ) => {
+    setQuickSavingSlotId(slot.id);
+    try {
+      const checklist: PatrolCheckItem[] =
+        preset === 'excellent'
+          ? ['class_normal', 'proper_equipment', 'student_focused', 'good_interaction']
+          : ['class_normal', 'student_focused'];
+      const existing = periodLogsBySlot.get(slot.id);
+      await savePatrolLog({
+        inspectorId: profile.uid,
+        inspectorName: profile.displayName,
+        date: selectedDate,
+        slot,
+        checklist,
+        status: 'normal',
+        note: existing?.note ?? '',
+        existingOwnLog: existing?.inspectorId === profile.uid ? existing : null,
+      });
+      onActionFeedback(
+        preset === 'excellent'
+          ? `★ 已快速登錄 ${slot.className}（${slot.roomNumber}）全項正向優良`
+          : `✓ 已快速打卡 ${slot.className}（${slot.roomNumber}）教學正常`
       );
-  }, [
-    timetables,
-    calendarDayOfWeek,
-    selectedPeriod,
-    buildingFilter,
-    statusFilter,
-    searchQuery,
-    periodLogsBySlot,
-  ]);
+    } catch (err) {
+      onActionFeedback(
+        `快速打卡失敗：${err instanceof Error ? err.message : '請稍後再試'}`
+      );
+    } finally {
+      setQuickSavingSlotId(null);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -292,6 +354,31 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
         </div>
       </div>
 
+      {/* Live Period Progress Strip */}
+      {periodProgress.total > 0 && (
+        <div className="bg-white border border-[#E5E1D8] rounded-2xl px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div className="flex items-center gap-3 text-xs">
+            <span className="font-bold text-[#1F2421]">
+              本節巡堂進度：
+              <span className="font-mono-num text-[#1E5C4B] ml-1">
+                {periodProgress.done} / {periodProgress.total} 班（{periodProgress.pct}%）
+              </span>
+            </span>
+            <span className="text-[#7C7A72]">
+              {periodProgress.remaining > 0
+                ? `尚有 ${periodProgress.remaining} 班待巡 · 可直接點擊卡片「正常／優良」一鍵打卡`
+                : '本節全部班級已完成巡堂！'}
+            </span>
+          </div>
+          <div className="w-full sm:w-44 h-2 bg-[#F2EFE9] rounded-full overflow-hidden shrink-0">
+            <div
+              className="h-full bg-[#1E5C4B] rounded-full transition-all duration-300"
+              style={{ width: `${periodProgress.pct}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Classroom Patrol Grid / Mobile Touch Cards */}
       {filteredSlots.length === 0 ? (
         <div className="bg-white border border-[#E5E1D8] rounded-2xl p-10 text-center space-y-2">
@@ -303,6 +390,7 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
           {filteredSlots.map((slot) => {
             const log = periodLogsBySlot.get(slot.id);
             const checklist = getEffectiveChecklist(log);
+            const isQuickSaving = quickSavingSlotId === slot.id;
 
             const statusColor = !log
               ? 'text-[#7C7A72]'
@@ -315,15 +403,21 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
                     : 'text-[#1E5C4B]';
 
             return (
-              <button
+              <div
                 key={slot.id}
-                type="button"
-                onClick={() => onSelectSlot(slot)}
-                className="bg-white border border-[#E5E1D8] hover:border-[#1E5C4B] rounded-2xl p-4 text-left transition-colors flex flex-col justify-between gap-3.5 min-h-[152px] cursor-pointer active:scale-[0.99]"
+                className={`bg-white border rounded-2xl p-4 transition-colors flex flex-col justify-between gap-3.5 min-h-[168px] ${
+                  log
+                    ? 'border-[#C6DFD7] bg-[#FCFDFC]'
+                    : 'border-[#E5E1D8] hover:border-[#1E5C4B]'
+                }`}
               >
-                <div className="space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => onSelectSlot(slot)}
+                  className="text-left space-y-1.5 cursor-pointer group"
+                >
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-base font-bold text-[#1F2421]">
+                    <div className="flex items-center gap-2 text-base font-bold text-[#1F2421] group-hover:text-[#1E5C4B] transition-colors">
                       <span>{slot.className}</span>
                       <span className="text-[#D4CEC2] font-normal" aria-hidden="true">
                         /
@@ -372,15 +466,48 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
                   {log && log.note && (
                     <p className="text-xs text-[#7C7A72] line-clamp-1">其他：{log.note}</p>
                   )}
-                </div>
+                </button>
 
-                <div className="pt-3 border-t border-[#F0ECE3] flex items-center justify-between text-xs text-[#7C7A72]">
-                  <span>{log ? `巡堂人：${log.inspectorName}` : `${slot.grade}`}</span>
-                  <span className="text-[#1E5C4B] font-semibold">
-                    {log ? '更新巡堂紀錄' : '開始勾選巡堂'}
-                  </span>
+                {/* Quick 1-Tap Field Patrol Actions */}
+                <div className="pt-2.5 border-t border-[#F0ECE3] space-y-2">
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <button
+                      type="button"
+                      disabled={isQuickSaving}
+                      onClick={() => handleQuickTapSave(slot, 'normal')}
+                      className="min-h-[38px] px-2 py-1.5 rounded-xl bg-[#E5F2EE] hover:bg-[#D5EAE3] active:scale-[0.98] disabled:opacity-50 text-[#1E5C4B] text-xs font-bold inline-flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                    >
+                      <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                      {isQuickSaving ? '儲存中' : '正常'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isQuickSaving}
+                      onClick={() => handleQuickTapSave(slot, 'excellent')}
+                      className="min-h-[38px] px-2 py-1.5 rounded-xl bg-[#FBF0E2] hover:bg-[#F4E2CB] active:scale-[0.98] disabled:opacity-50 text-[#9A5B13] text-xs font-bold inline-flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      優良
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isQuickSaving}
+                      onClick={() => onSelectSlot(slot)}
+                      className="min-h-[38px] px-2 py-1.5 rounded-xl bg-[#FAF9F5] hover:bg-[#FCEBE7] hover:text-[#B44326] border border-[#E5E1D8] text-[#3A3F3B] text-xs font-semibold inline-flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                    >
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      {log ? '修改' : '詳填'}
+                    </button>
+                  </div>
+
+                  {log && (
+                    <div className="flex items-center justify-between text-[11px] text-[#7C7A72] px-0.5">
+                      <span>巡堂人：{log.inspectorName}</span>
+                      <span>點擊上方文字可詳修</span>
+                    </div>
+                  )}
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>
@@ -394,10 +521,15 @@ export const PatrolWorkspaceView: React.FC<PatrolWorkspaceViewProps> = ({
           profile={profile}
           selectedDate={selectedDate}
           existingLog={periodLogsBySlot.get(activeSlot.id) ?? null}
+          nextPendingSlot={nextPendingSlot}
           onClose={() => onSelectSlot(null)}
-          onSaved={(msg) => {
-            onSelectSlot(null);
+          onSaved={(msg, advanceToNext) => {
             onActionFeedback(msg);
+            if (advanceToNext && nextPendingSlot) {
+              onSelectSlot(nextPendingSlot);
+            } else {
+              onSelectSlot(null);
+            }
           }}
         />
       )}
@@ -410,8 +542,9 @@ interface QuickPatrolDrawerProps {
   profile: StaffProfile;
   selectedDate: string;
   existingLog: PatrolLog | null;
+  nextPendingSlot: TimetableSlot | null;
   onClose: () => void;
-  onSaved: (message: string) => void;
+  onSaved: (message: string, advanceToNext?: boolean) => void;
 }
 
 const QuickPatrolDrawer: React.FC<QuickPatrolDrawerProps> = ({
@@ -419,6 +552,7 @@ const QuickPatrolDrawer: React.FC<QuickPatrolDrawerProps> = ({
   profile,
   selectedDate,
   existingLog,
+  nextPendingSlot,
   onClose,
   onSaved,
 }) => {
@@ -472,8 +606,16 @@ const QuickPatrolDrawer: React.FC<QuickPatrolDrawerProps> = ({
     setStatus('normal');
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const appendQuickNote = (phrase: string) => {
+    setNote((prev) => {
+      const trimmed = prev.trim();
+      if (!trimmed) return phrase;
+      if (trimmed.includes(phrase)) return prev;
+      return `${trimmed}、${phrase}`.slice(0, 500);
+    });
+  };
+
+  const saveCurrentPatrol = async (advanceToNext: boolean) => {
     setSubmitting(true);
     try {
       await savePatrolLog({
@@ -522,11 +664,17 @@ const QuickPatrolDrawer: React.FC<QuickPatrolDrawerProps> = ({
       onSaved(
         `已完成 ${slot.className}（${slot.roomNumber}）第 ${slot.period} 節巡堂紀錄${
           alsoReportIncident ? '並同步送出異常通報' : ''
-        }`
+        }`,
+        advanceToNext
       );
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await saveCurrentPatrol(false);
   };
 
   return (
@@ -643,11 +791,30 @@ const QuickPatrolDrawer: React.FC<QuickPatrolDrawerProps> = ({
             </div>
           </div>
 
-          {/* Group 3: 其他 (Free-text note shown directly as ☑ 其他：... on report) */}
-          <div className="space-y-1.5 pt-2 border-t border-[#F0ECE3]">
+          {/* Group 3: 其他 + Quick Note Phrase Chips */}
+          <div className="space-y-2 pt-2 border-t border-[#F0ECE3]">
             <label className="text-xs font-bold text-[#3A3F3B] block">
-              三、其他紀錄說明（填寫後報表將自動勾選「☑ 其他」）
+              三、其他紀錄說明（點選快捷詞彙即可帶入，免打字）
             </label>
+            <div className="flex flex-wrap gap-1.5">
+              {PATROL_QUICK_NOTES.map((phrase) => {
+                const selected = note.includes(phrase);
+                return (
+                  <button
+                    key={phrase}
+                    type="button"
+                    onClick={() => appendQuickNote(phrase)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
+                      selected
+                        ? 'bg-[#E5F2EE] border-[#1E5C4B] text-[#1E5C4B]'
+                        : 'bg-[#FAF9F5] border-[#E5E1D8] text-[#5C615C] hover:bg-[#F2EFE9]'
+                    }`}
+                  >
+                    + {phrase}
+                  </button>
+                );
+              })}
+            </div>
             <textarea
               rows={2}
               maxLength={500}
@@ -743,22 +910,37 @@ const QuickPatrolDrawer: React.FC<QuickPatrolDrawerProps> = ({
             )}
           </div>
 
-          {/* Sticky Footer Submit */}
-          <div className="pt-2 flex items-center justify-end gap-2.5">
+          {/* Sticky Footer Submit with Continuous Next-Room Patrol */}
+          <div className="pt-2 flex flex-wrap items-center justify-end gap-2">
             <button
               type="button"
               onClick={onClose}
-              className="min-h-[46px] px-4 py-2 text-sm font-medium text-[#5C615C] hover:text-[#1F2421] rounded-xl cursor-pointer"
+              className="min-h-[44px] px-3.5 py-2 text-sm font-medium text-[#5C615C] hover:text-[#1F2421] rounded-xl cursor-pointer"
             >
               取消
             </button>
             <button
               type="submit"
               disabled={submitting}
-              className="min-h-[46px] px-6 py-2.5 bg-[#1E5C4B] hover:bg-[#16473A] disabled:opacity-60 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer"
+              className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl transition-colors cursor-pointer disabled:opacity-60 ${
+                nextPendingSlot
+                  ? 'bg-white hover:bg-[#FAF9F5] text-[#1E5C4B] border border-[#1E5C4B]'
+                  : 'bg-[#1E5C4B] hover:bg-[#16473A] text-white px-6'
+              }`}
             >
-              {submitting ? '正在儲存同步...' : '完成巡堂並即時同步'}
+              {submitting ? '儲存中...' : nextPendingSlot ? '儲存並關閉' : '完成巡堂並即時同步'}
             </button>
+            {nextPendingSlot && (
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => void saveCurrentPatrol(true)}
+                className="min-h-[44px] px-5 py-2 bg-[#1E5C4B] hover:bg-[#16473A] disabled:opacity-60 text-white text-sm font-semibold rounded-xl inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <span>儲存並巡下一班（{nextPendingSlot.className}）</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </form>
       </div>

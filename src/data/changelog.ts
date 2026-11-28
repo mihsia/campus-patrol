@@ -9,7 +9,7 @@ export interface ChangelogEntry {
   highlights?: string[];
 }
 
-export const CURRENT_APP_VERSION = 'v1.10';
+export const CURRENT_APP_VERSION = 'v1.11';
 export const CURRENT_APP_DATE = '2026-11-28';
 
 export const CHANGELOG_CATEGORY_LABELS: Record<ChangelogCategory, string> = {
@@ -24,6 +24,20 @@ export const CHANGELOG_CATEGORY_LABELS: Record<ChangelogCategory, string> = {
  * 每次系統修正或新增功能時，請於陣列最上方新增一筆紀錄並同步更新 CURRENT_APP_VERSION。
  */
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
+  {
+    version: 'v1.11',
+    date: '2026-11-28',
+    category: 'feature',
+    title: '帳號管理改版、學年度週期、各班課表 Word/PDF 下載與行動巡堂一鍵快選',
+    summary:
+      '全面優化四大實務操作體驗：帳號管理改為單一緊湊表格（可切換處室分組）並支援原地角色切換、啟用開關與批次貼上匯入名單；學校基本資料與課表改以「學年度（本年 8/1 ～ 隔年 7/31）」為主軸並提供自動推算；班級課表與報表匯出雙入口皆支援單班／多班／全校日課表 Word（.docx）與 A4 PDF 下載；行動巡堂新增卡片一鍵快速打卡、常用備註快捷膠囊、樓層動線排序與「儲存並巡下一班」連續模式。',
+    highlights: [
+      '帳號管理：單一緊湊清單＋處室篩選膠囊、點擊切換管理者／使用者、啟用狀態開關與 Excel／文字批次貼上匯入名單，並修正底部過時權限說明。',
+      '學年度週期：明確標示學年度適用期間（如 115 學年度：2026/08/01 ～ 2027/07/31），編輯設定可一鍵依今日自動帶入所屬學年度。',
+      '各班級課表下載：於「班級課表」與「報表匯出」皆可下載單一班級或全校各班日課表 Word（.docx）與列印 A4 PDF（每班自動獨立分頁）。',
+      '行動巡堂提速：班級卡片直接提供「✓ 正常／★ 優良／⚠ 詳填」一鍵打卡、依樓棟樓層動線排序、詳填抽屜新增常用備註膠囊與「儲存並巡下一班」連續巡堂。',
+    ],
+  },
   {
     version: 'v1.10',
     date: '2026-11-28',

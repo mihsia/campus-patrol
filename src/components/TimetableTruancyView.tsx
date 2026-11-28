@@ -8,11 +8,13 @@ import {
   ClipboardCheck,
   Database,
   Download,
+  FileDown,
   FileUp,
   List,
   MapPin,
   Pencil,
   Plus,
+  Printer,
   Search,
   Sparkles,
   Trash2,
@@ -31,6 +33,7 @@ import {
   DAY_OF_WEEK_SHORT,
   PERIOD_SCHEDULE,
   STANDARD_GRADES,
+  getAcademicYearPeriod,
 } from '../types/patrol';
 import {
   batchDeleteIncidents,
@@ -40,7 +43,11 @@ import {
   deleteTimetableSlot,
   updateTimetableSlot,
 } from '../lib/firestoreOps';
-import { exportTimetableBackupCsv } from '../lib/exportReports';
+import {
+  exportClassTimetablesWordDocx,
+  exportTimetableBackupCsv,
+  printClassTimetablesPdf,
+} from '../lib/exportReports';
 
 const TimetableImportModal = lazy(() =>
   import('./TimetableImportModal').then((m) => ({ default: m.TimetableImportModal }))
@@ -194,6 +201,53 @@ export const TimetableTruancyView: React.FC<TimetableViewProps> = ({
       );
   }, [timetables, dayFilter, buildingFilter, searchQuery]);
 
+  const [exportingTimetableDocx, setExportingTimetableDocx] = useState(false);
+  const yearInfo = useMemo(
+    () => getAcademicYearPeriod(schoolSettings.academicYear),
+    [schoolSettings.academicYear]
+  );
+
+  const handleExportClassWord = async (targetClasses?: string[]) => {
+    setExportingTimetableDocx(true);
+    try {
+      const count = await exportClassTimetablesWordDocx({
+        schoolSettings,
+        timetables,
+        selectedClassNames: targetClasses,
+      });
+      onActionFeedback(
+        count === 1 && targetClasses?.[0]
+          ? `已下載「${targetClasses[0]}」日課表 Word（.docx）`
+          : `已下載全校 ${count} 個班級日課表 Word（.docx，每班一頁）`
+      );
+    } catch (err) {
+      onActionFeedback(
+        `課表 Word 匯出失敗：${err instanceof Error ? err.message : '請稍後再試'}`
+      );
+    } finally {
+      setExportingTimetableDocx(false);
+    }
+  };
+
+  const handlePrintClassPdf = (targetClasses?: string[]) => {
+    try {
+      const count = printClassTimetablesPdf({
+        schoolSettings,
+        timetables,
+        selectedClassNames: targetClasses,
+      });
+      onActionFeedback(
+        count === 1 && targetClasses?.[0]
+          ? `已開啟「${targetClasses[0]}」日課表列印／存成 PDF 視窗`
+          : `已開啟全校 ${count} 個班級日課表列印／存成 PDF 視窗（每班一頁）`
+      );
+    } catch (err) {
+      onActionFeedback(
+        `課表 PDF 列印失敗：${err instanceof Error ? err.message : '請稍後再試'}`
+      );
+    }
+  };
+
   const handleClearActiveClass = async () => {
     if (!effectiveClassName || activeClassSlots.length === 0) return;
     setClearingClass(true);
@@ -213,7 +267,8 @@ export const TimetableTruancyView: React.FC<TimetableViewProps> = ({
         <div>
           <h1 className="text-2xl font-bold text-[#1F2421] tracking-tight">班級課表管理</h1>
           <p className="text-sm text-[#7C7A72] mt-1">
-            {schoolSettings.schoolName} · {schoolSettings.academicYear} 學年度{schoolSettings.semester} · 已建立{' '}
+            {schoolSettings.schoolName} ·{' '}
+            <span className="font-mono-num text-[#1F2421] font-medium">{yearInfo.fullLabel}</span> · 已建立{' '}
             <span className="font-mono-num font-semibold text-[#1F2421]">{classDirectory.length}</span> 個班級、共{' '}
             <span className="font-mono-num font-semibold text-[#1F2421]">{timetables.length}</span> 筆巡堂排課
           </p>
@@ -295,19 +350,38 @@ export const TimetableTruancyView: React.FC<TimetableViewProps> = ({
               </button>
             )}
             {timetables.length > 0 && (
-              <button
-                type="button"
-                onClick={() =>
-                  exportTimetableBackupCsv(
-                    timetables,
-                    `${schoolSettings.schoolName}_${schoolSettings.academicYear}學年度${schoolSettings.semester}_課表備份.csv`
-                  )
-                }
-                className="min-h-[38px] px-3.5 py-1.5 bg-white hover:bg-[#FAF9F5] text-[#3A3F3B] border border-[#DDD8CD] text-xs font-medium rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                備份課表 CSV
-              </button>
+              <>
+                <button
+                  type="button"
+                  disabled={exportingTimetableDocx}
+                  onClick={() => handleExportClassWord()}
+                  className="min-h-[38px] px-3.5 py-1.5 bg-[#E5F2EE] hover:bg-[#D5EAE3] disabled:opacity-60 text-[#1E5C4B] border border-[#C6DFD7] text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                >
+                  <FileDown className="w-3.5 h-3.5" />
+                  {exportingTimetableDocx ? '產生中...' : '下載全校課表 Word'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handlePrintClassPdf()}
+                  className="min-h-[38px] px-3.5 py-1.5 bg-white hover:bg-[#FAF9F5] text-[#3A3F3B] border border-[#DDD8CD] text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  列印全校 PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    exportTimetableBackupCsv(
+                      timetables,
+                      `${schoolSettings.schoolName}_${yearInfo.academicYear}學年度_課表備份.csv`
+                    )
+                  }
+                  className="min-h-[38px] px-3.5 py-1.5 bg-white hover:bg-[#FAF9F5] text-[#3A3F3B] border border-[#DDD8CD] text-xs font-medium rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  備份 CSV
+                </button>
+              </>
             )}
             {isAdmin && (timetables.length > 0 || patrolLogs.length > 0 || incidents.length > 0) && (
               <button
@@ -331,7 +405,7 @@ export const TimetableTruancyView: React.FC<TimetableViewProps> = ({
               </button>
             )}
             {!isAdmin && (
-              <span className="text-xs text-[#7C7A72]">課表讀取與維護限管理者操作</span>
+              <span className="text-xs text-[#7C7A72]">課表維護限管理者，所有人員皆可下載各班課表</span>
             )}
           </div>
         </div>
@@ -437,9 +511,25 @@ export const TimetableTruancyView: React.FC<TimetableViewProps> = ({
                     已匯入 <span className="font-mono-num font-semibold text-[#1F2421]">{activeClassMeta.slotCount}</span> 節授課時段
                   </span>
                 </div>
-                <span className="text-[11px] text-[#7C7A72]">
-                  點擊任一課程卡片可前往巡堂{isAdmin ? '或編修課表' : ''}
-                </span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={exportingTimetableDocx}
+                    onClick={() => handleExportClassWord([activeClassMeta.className])}
+                    className="min-h-[32px] px-2.5 py-1 bg-white hover:bg-[#E5F2EE] text-[#1E5C4B] border border-[#C6DFD7] rounded-lg text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <FileDown className="w-3.5 h-3.5" />
+                    下載本班 Word
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handlePrintClassPdf([activeClassMeta.className])}
+                    className="min-h-[32px] px-2.5 py-1 bg-white hover:bg-[#F2EFE9] text-[#3A3F3B] border border-[#DDD8CD] rounded-lg text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    列印本班 PDF
+                  </button>
+                </div>
               </div>
             )}
 
