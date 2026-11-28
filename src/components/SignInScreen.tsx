@@ -151,6 +151,8 @@ interface AccessBlockedScreenProps {
   email: string;
   displayName?: string;
   department?: string;
+  detailMessage?: string | null;
+  hubUrl?: string;
   onSignOut: () => Promise<void>;
   onSwitchAccount: () => Promise<void>;
 }
@@ -160,6 +162,8 @@ export const AccessBlockedScreen: React.FC<AccessBlockedScreenProps> = ({
   email,
   displayName,
   department,
+  detailMessage,
+  hubUrl,
   onSignOut,
   onSwitchAccount,
 }) => {
@@ -190,15 +194,16 @@ export const AccessBlockedScreen: React.FC<AccessBlockedScreenProps> = ({
           </div>
           <div className="space-y-1.5">
             <p className="text-xs font-semibold text-[#7C7A72]">
-              校園即時巡堂系統 CampusPatrol · 存取權限控管
+              校園即時巡堂系統 CampusPatrol · 全校統一帳號權限控管
             </p>
             <h1 className="text-xl font-bold text-[#1F2421]">
-              {isDisabled ? '此 Google 帳號目前已停用' : '此 Google 帳號尚未開通使用權限'}
+              {isDisabled ? '此帳號之巡堂系統權限已停用' : '此帳號尚未開通巡堂系統權限'}
             </h1>
             <p className="text-sm text-[#5C615C] leading-relaxed">
-              {isDisabled
-                ? '系統管理者已停用您的巡堂系統存取權限，目前無法檢視或操作校務資料。如需重新啟用，請聯繫學校系統管理者。'
-                : '本系統僅限經學校系統管理者列入授權名單的 Google 帳號登入。請將下列 Google 帳號提供給管理者開通「使用者」或「管理者」權限後再重新登入。'}
+              {detailMessage ||
+                (isDisabled
+                  ? '系統管理者已於全校帳號管理中心停用您的存取權限，目前無法檢視或操作校務資料。如需重新啟用，請聯繫學校系統管理者。'
+                  : '本系統已整合全校統一帳號管理中心，僅限已開通「校園巡堂」權限的教職員登入。請將下列帳號提供給管理者開通權限後再重新登入。')}
             </p>
           </div>
         </div>
@@ -216,12 +221,16 @@ export const AccessBlockedScreen: React.FC<AccessBlockedScreenProps> = ({
             </button>
           </div>
           <p className="font-mono-num font-semibold text-[#1F2421] break-all">{email}</p>
-          {isDisabled && (displayName || department) && (
+          {(displayName || department) && (
             <p className="text-xs text-[#7C7A72] pt-1">
               {displayName}
               {department ? ` · ${department}` : ''}
-              <span aria-hidden="true"> · </span>
-              <span className="text-[#B44326] font-semibold">狀態：已停用</span>
+              {isDisabled && (
+                <>
+                  <span aria-hidden="true"> · </span>
+                  <span className="text-[#B44326] font-semibold">狀態：已停用</span>
+                </>
+              )}
             </p>
           )}
         </div>
@@ -243,7 +252,55 @@ export const AccessBlockedScreen: React.FC<AccessBlockedScreenProps> = ({
             登出系統
           </button>
         </div>
+
+        {hubUrl && (
+          <p className="text-center text-xs text-[#7C7A72]">
+            管理者請前往{' '}
+            <a
+              href={hubUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="font-semibold text-[#1E5C4B] underline underline-offset-2"
+            >
+              全校統一帳號管理中心
+            </a>{' '}
+            為此帳號指派「校園巡堂」權限。
+          </p>
+        )}
       </div>
     </div>
   );
 };
+
+export const HubConfigMissingScreen: React.FC = () => (
+  <div className="min-h-screen bg-[#F6F4EE] flex items-center justify-center p-6">
+    <div className="w-full max-w-xl bg-white border border-[#E5E1D8] rounded-2xl p-6 sm:p-8 space-y-5">
+      <div className="flex items-start gap-3.5">
+        <div className="w-11 h-11 rounded-xl bg-[#FBF0E2] text-[#9A5B13] flex items-center justify-center shrink-0">
+          <ShieldAlert className="w-6 h-6" />
+        </div>
+        <div className="space-y-1.5">
+          <p className="text-xs font-semibold text-[#7C7A72]">
+            校園即時巡堂系統 CampusPatrol · 系統初始化提醒
+          </p>
+          <h1 className="text-xl font-bold text-[#1F2421]">
+            尚未設定全校統一帳號管理中心連線參數
+          </h1>
+          <p className="text-sm text-[#5C615C] leading-relaxed">
+            本系統已升級為跨專案統一帳號架構（方案 B），請於 Cloudflare Workers 的 Build Variables
+            或本機 <code className="font-mono-num text-xs bg-[#F2EFE9] px-1.5 py-0.5 rounded">.env</code>{' '}
+            設定下列帳號中心環境變數後重新建置部署：
+          </p>
+        </div>
+      </div>
+
+      <pre className="p-4 rounded-xl bg-[#FAF9F5] border border-[#E5E1D8] text-xs font-mono-num text-[#1F2421] overflow-x-auto leading-relaxed">
+{`VITE_ACCOUNT_HUB_API_KEY=<ltps-account-hub Web API Key>
+VITE_ACCOUNT_HUB_AUTH_DOMAIN=ltps-account-hub.firebaseapp.com
+VITE_ACCOUNT_HUB_PROJECT_ID=ltps-account-hub
+VITE_ACCOUNT_HUB_APP_ID=<ltps-account-hub Web App ID>
+VITE_ACCOUNT_HUB_URL=https://ltps-account-hub.mihsia.workers.dev`}
+      </pre>
+    </div>
+  </div>
+);

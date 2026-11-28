@@ -1,39 +1,69 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import { getApps, initializeApp, type FirebaseApp } from 'firebase/app';
+import { getAuth, GoogleAuthProvider, type Auth } from 'firebase/auth';
 import {
-  doc,
-  getDocFromServer,
   getFirestore,
   initializeFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
   type Firestore,
 } from 'firebase/firestore';
+import { getFunctions, type Functions } from 'firebase/functions';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
+export const ACCOUNT_HUB_APP_NAME = 'ltps-account-hub';
+export const ACCOUNT_HUB_URL =
+  import.meta.env.VITE_ACCOUNT_HUB_URL || 'https://ltps-account-hub.mihsia.workers.dev';
 
-function createFirestoreInstance(): Firestore {
+const existingApps = getApps();
+const app: FirebaseApp =
+  existingApps.find((a) => a.name === '[DEFAULT]') || initializeApp(firebaseConfig);
+
+function createFirestoreInstance(targetApp: FirebaseApp, databaseId?: string): Firestore {
   try {
     return initializeFirestore(
-      app,
+      targetApp,
       {
         localCache: persistentLocalCache({
           tabManager: persistentMultipleTabManager(),
         }),
       },
-      firebaseConfig.firestoreDatabaseId
+      databaseId
     );
   } catch (error) {
     // Graceful fallback when IndexedDB is unavailable (e.g. private browsing) or during HMR re-init
     console.warn('Firestore persistent cache unavailable, falling back to default cache:', error);
-    return getFirestore(app, firebaseConfig.firestoreDatabaseId);
+    return databaseId ? getFirestore(targetApp, databaseId) : getFirestore(targetApp);
   }
 }
 
-// CRITICAL: Bind to the provisioned named Firestore database ID from firebase-applet-config.json
-export const db = createFirestoreInstance();
-export const auth = getAuth(app);
+// CRITICAL: Bind business operational database to the provisioned named Firestore database ID
+export const db = createFirestoreInstance(app, firebaseConfig.firestoreDatabaseId);
+export const auth: Auth = getAuth(app);
+
+// 方案 B：第二個具名 Firebase App，連接獨立的校級帳號管理中心（ltps-account-hub）
+const hubFirebaseConfig = {
+  apiKey: import.meta.env.VITE_ACCOUNT_HUB_API_KEY || '',
+  authDomain: import.meta.env.VITE_ACCOUNT_HUB_AUTH_DOMAIN || 'ltps-account-hub.firebaseapp.com',
+  projectId: import.meta.env.VITE_ACCOUNT_HUB_PROJECT_ID || 'ltps-account-hub',
+  appId: import.meta.env.VITE_ACCOUNT_HUB_APP_ID || '',
+};
+
+export const isAccountHubConfigured = Boolean(
+  hubFirebaseConfig.apiKey &&
+    hubFirebaseConfig.authDomain &&
+    hubFirebaseConfig.projectId &&
+    hubFirebaseConfig.appId
+);
+
+const hubApp: FirebaseApp | null = isAccountHubConfigured
+  ? existingApps.find((a) => a.name === ACCOUNT_HUB_APP_NAME) ||
+    initializeApp(hubFirebaseConfig, ACCOUNT_HUB_APP_NAME)
+  : null;
+
+export const hubAuth: Auth | null = hubApp ? getAuth(hubApp) : null;
+export const hubDb: Firestore | null = hubApp ? getFirestore(hubApp) : null;
+export const hubFunctions: Functions | null = hubApp ? getFunctions(hubApp) : null;
+
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
@@ -68,16 +98,17 @@ export function handleFirestoreError(
   operationType: OperationType,
   path: string | null
 ): never {
+  const activeUser = auth.currentUser || hubAuth?.currentUser;
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
+      userId: activeUser?.uid,
+      email: hubAuth?.currentUser?.email || auth.currentUser?.email,
+      emailVerified: hubAuth?.currentUser?.emailVerified ?? auth.currentUser?.emailVerified,
+      isAnonymous: activeUser?.isAnonymous,
+      tenantId: activeUser?.tenantId,
       providerInfo:
-        auth.currentUser?.providerData?.map((provider) => ({
+        activeUser?.providerData?.map((provider) => ({
           providerId: provider.providerId,
           email: provider.email,
         })) || [],
@@ -88,15 +119,3 @@ export function handleFirestoreError(
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
-
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration.');
-    }
-  }
-}
-
-void testConnection();

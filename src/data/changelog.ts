@@ -9,7 +9,7 @@ export interface ChangelogEntry {
   highlights?: string[];
 }
 
-export const CURRENT_APP_VERSION = 'v1.11';
+export const CURRENT_APP_VERSION = 'v1.12';
 export const CURRENT_APP_DATE = '2026-11-28';
 
 export const CHANGELOG_CATEGORY_LABELS: Record<ChangelogCategory, string> = {
@@ -24,6 +24,20 @@ export const CHANGELOG_CATEGORY_LABELS: Record<ChangelogCategory, string> = {
  * 每次系統修正或新增功能時，請於陣列最上方新增一筆紀錄並同步更新 CURRENT_APP_VERSION。
  */
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
+  {
+    version: 'v1.12',
+    date: '2026-11-28',
+    category: 'infra',
+    title: '導入全校統一帳號管理中心（方案 B 跨專案 SSO 與共用帳號管理元件）',
+    summary:
+      '全面接入獨立的校級帳號管理中心（ltps-account-hub）與前端共用套件 @ltps/account-sdk：使用者透過全校統一 Google 帳號登入後，系統自動換發本專案專屬 Custom Token 並即時監聽權限異動；「帳號管理」頁面嵌入全校共用管理介面，支援單一系統新增、編輯、Excel 批次匯入與即時停權，不影響教職員在其他校務系統的登入；同步升級 Firestore 安全規則為免額外讀取（Zero-Read）Custom Claims 驗證並封存舊版單機帳號集合。',
+    highlights: [
+      '跨專案 SSO 認證（方案 B）：透過 hubAuth 登入校級帳號中心，即時監聽 /accounts/{uid} 並透過 accounts_issueAppToken 自動換發校園巡堂專屬憑證。',
+      '嵌入式帳號管理介面：導入 @ltps/account-sdk 的 <LtpsAccountManager mode="app" appId="patrol" />，統一操作體驗並支援 Excel 範本匯入與自動掛載既有人員。',
+      '免額外讀取安全規則：firestore.rules 全面改採 Custom Claims（g、sa、apps.patrol.r）驗證，消除每次請求的額外帳號讀取成本，同時封存舊版 allowedAccounts 為唯讀。',
+      '新增 firebase.json 明確鎖定巡堂專屬具名 Firestore 資料庫，避免部署安全規則時誤觸同專案其他系統。',
+    ],
+  },
   {
     version: 'v1.11',
     date: '2026-11-28',
