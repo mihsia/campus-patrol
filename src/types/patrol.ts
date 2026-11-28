@@ -480,6 +480,62 @@ export function getDayOfWeekFromDate(dateStr: string): number {
   return day;
 }
 
+export const PATROL_QUICK_NOTES: readonly string[] = [
+  '學生專注度高',
+  '分組討論熱絡',
+  '科任移地正常',
+  '已調代課正常上課',
+  '已現場口頭提醒秩序',
+  '教師晚到 5 分鐘',
+  '投影／音響待報修',
+  '教室環境整潔良好',
+];
+
+export interface AcademicYearPeriodInfo {
+  academicYear: string;
+  startYearAD: number;
+  endYearAD: number;
+  startDate: string; // YYYY/08/01
+  endDate: string; // YYYY/07/31
+  rangeText: string; // e.g. 2026/08/01 ～ 2027/07/31
+  fullLabel: string; // e.g. 115 學年度（2026/08/01 ～ 2027/07/31）
+}
+
+/**
+ * Computes Taiwanese school academic year range (Aug 1 to next year Jul 31).
+ * Accepts ROC year (e.g. "115") or 4-digit AD year (e.g. "2026").
+ */
+export function getAcademicYearPeriod(academicYearRaw: string): AcademicYearPeriodInfo {
+  const numeric = Number(String(academicYearRaw).replace(/[^0-9]/g, ''));
+  const startYearAD =
+    numeric >= 1912 ? numeric : numeric >= 1 && numeric < 300 ? numeric + 1911 : new Date().getFullYear();
+  const rocYear = startYearAD - 1911;
+  const endYearAD = startYearAD + 1;
+  const academicYear = String(rocYear > 0 ? rocYear : numeric || '115');
+  const startDate = `${startYearAD}/08/01`;
+  const endDate = `${endYearAD}/07/31`;
+  const rangeText = `${startDate} ～ ${endDate}`;
+  return {
+    academicYear,
+    startYearAD,
+    endYearAD,
+    startDate,
+    endDate,
+    rangeText,
+    fullLabel: `${academicYear} 學年度（${rangeText}）`,
+  };
+}
+
+/**
+ * Detects current ROC academic year from a date (Aug 1 starts the new academic year).
+ */
+export function detectCurrentAcademicYear(date: Date = new Date()): string {
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1; // 1..12
+  const rocStartYear = month >= 8 ? year - 1911 : year - 1912;
+  return String(Math.max(100, rocStartYear));
+}
+
 export function detectCurrentPeriod(): number {
   const now = new Date();
   const minutes = now.getHours() * 60 + now.getMinutes();

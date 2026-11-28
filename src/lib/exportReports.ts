@@ -13,7 +13,9 @@ import {
   INCIDENT_STATUS_LABELS,
   PATROL_CHECKLIST_LABELS,
   PATROL_STATUS_LABELS,
+  PERIOD_SCHEDULE,
   STANDARD_GRADES,
+  getAcademicYearPeriod,
   getEffectiveChecklist,
 } from '../types/patrol';
 import { clampInt, clampString } from './validation';
@@ -948,4 +950,402 @@ export function exportTimetableBackupCsv(
     t.locationNote,
   ]);
   exportCsvWithBom(fileName, headers, rows);
+}
+
+export interface ClassTimetableGroup {
+  className: string;
+  grade: string;
+  building: string;
+  floor: string;
+  roomNumber: string;
+  slots: TimetableSlot[];
+  maxPeriod: number;
+}
+
+/**
+ * Groups timetable slots by className sorted in Taiwanese elementary grade order.
+ */
+export function groupTimetablesByClass(
+  timetables: TimetableSlot[],
+  selectedClassNames?: string[]
+): ClassTimetableGroup[] {
+  const filterSet =
+    selectedClassNames && selectedClassNames.length > 0 ? new Set(selectedClassNames) : null;
+  const map = new Map<string, TimetableSlot[]>();
+
+  timetables.forEach((slot) => {
+    if (!slot.className) return;
+    if (filterSet && !filterSet.has(slot.className)) return;
+    const list = map.get(slot.className) || [];
+    list.push(slot);
+    map.set(slot.className, list);
+  });
+
+  return Array.from(map.entries())
+    .map(([className, slots]) => {
+      const first = slots[0];
+      const highestPeriod = slots.reduce((max, s) => Math.max(max, s.period), 7);
+      return {
+        className,
+        grade: first.grade || '',
+        building: first.building || '',
+        floor: first.floor || '',
+        roomNumber: first.roomNumber || '',
+        slots: [...slots].sort((a, b) => a.period - b.period || a.dayOfWeek - b.dayOfWeek),
+        maxPeriod: Math.max(7, Math.min(8, highestPeriod)),
+      };
+    })
+    .sort((a, b) => {
+      const rDiff = getGradeRank(a.grade) - getGradeRank(b.grade);
+      if (rDiff !== 0) return rDiff;
+      return a.className.localeCompare(b.className, 'zh-Hant');
+    });
+}
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/**
+ * Exports one or all classes' weekly timetables as a formatted Microsoft Word (.docx) file
+ * (one class per A4 page, ready for classroom posting or administrative filing).
+ */
+export async function exportClassTimetablesWordDocx(params: {
+  schoolSettings: SchoolSettings;
+  timetables: TimetableSlot[];
+  selectedClassNames?: string[];
+}): Promise<number> {
+  const groups = groupTimetablesByClass(params.timetables, params.selectedClassNames);
+  if (groups.length === 0) {
+    throw new Error('沒有可匯出的班級課表資料');
+  }
+
+  const {
+    AlignmentType,
+    BorderStyle,
+    Document,
+    HeightRule,
+    Packer,
+    Paragraph,
+    ShadingType,
+    Table,
+    TableCell,
+    TableLayoutType,
+    TableRow,
+    TextRun,
+    VerticalAlign,
+    WidthType,
+  } = await import('docx');
+
+  const border = { style: BorderStyle.SINGLE, size: 6, color: '1F2421' };
+  const borders = { top: border, bottom: border, left: border, right: border };
+  const yearInfo = getAcademicYearPeriod(params.schoolSettings.academicYear);
+
+  const makeRun = (
+    text: string,
+    opts?: { bold?: boolean; size?: number; color?: string }
+  ) =>
+    new TextRun({
+      text,
+      bold: opts?.bold ?? false,
+      size: opts?.size ?? 21,
+      font: FONT_KAITI,
+      color: opts?.color ?? '000000',
+    });
+
+  // A4 printable width = 10466 twips -> [節次時間: 1716, 週一..週五: 1750 * 5 = 8750]
+  const colWidths = [1716, 1750, 1750, 1750, 1750, 1750];
+
+  const sections = groups.map((group) => {
+    const slotMap = new Map<string, TimetableSlot[]>();
+    group.slots.forEach((s) => {
+      const k = `${s.dayOfWeek}-${s.period}`;
+      const arr = slotMap.get(k) || [];
+      arr.push(s);
+      slotMap.set(k, arr);
+    });
+
+    const headerRow = new TableRow({
+      tableHeader: true,
+      height: { value: 480, rule: HeightRule.ATLEAST },
+      children: ['節次／時間', '星期一', '星期二', '星期三', '星期四', '星期五'].map(
+        (title, idx) =>
+          new TableCell({
+            width: { size: colWidths[idx], type: WidthType.DXA },
+            borders,
+            verticalAlign: VerticalAlign.CENTER,
+            shading: { type: ShadingType.CLEAR, fill: 'E8F1EE' },
+            children: [
+              new Paragraph({
+                alignment: AlignmentType.CENTER,
+                children: [makeRun(title, { bold: true, size: 22 })],
+              }),
+            ],
+          })
+      ),
+    });
+
+    const bodyRows = PERIOD_SCHEDULE.filter((p) => p.period <= group.maxPeriod).map((p) => {
+      const cells = [
+        new TableCell({
+          width: { size: colWidths[0], type: WidthType.DXA },
+          borders,
+          verticalAlign: VerticalAlign.CENTER,
+          shading: { type: ShadingType.CLEAR, fill: 'FAF9F5' },
+          children: [
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              children: [makeRun(p.label, { bold: true, size: 20 })],
+            }),
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              children: [makeRun(`${p.start}–${p.end}`, { size: 17, color: '5C615C' })],
+            }),
+          ],
+        }),
+        ...[1, 2, 3, 4, 5].map((dow) => {
+          const items = slotMap.get(`${dow}-${p.period}`) || [];
+          const paragraphs =
+            items.length === 0
+              ? [
+                  new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    children: [makeRun('—', { size: 19, color: '9A968C' })],
+                  }),
+                ]
+              : items.flatMap((slot) => {
+                  const lines = [
+                    new Paragraph({
+                      alignment: AlignmentType.CENTER,
+                      spacing: { after: 30 },
+                      children: [makeRun(slot.subject, { bold: true, size: 22 })],
+                    }),
+                    new Paragraph({
+                      alignment: AlignmentType.CENTER,
+                      children: [makeRun(slot.teacherName, { size: 19, color: '3A3F3B' })],
+                    }),
+                  ];
+                  if (slot.isRelocated && slot.locationNote) {
+                    lines.push(
+                      new Paragraph({
+                        alignment: AlignmentType.CENTER,
+                        children: [
+                          makeRun(`(${slot.locationNote})`, { size: 16, color: '245A84' }),
+                        ],
+                      })
+                    );
+                  }
+                  return lines;
+                });
+
+          return new TableCell({
+            width: { size: colWidths[dow], type: WidthType.DXA },
+            borders,
+            verticalAlign: VerticalAlign.CENTER,
+            children: paragraphs,
+          });
+        }),
+      ];
+
+      return new TableRow({
+        height: { value: 1120, rule: HeightRule.ATLEAST },
+        children: cells,
+      });
+    });
+
+    const table = new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      layout: TableLayoutType.FIXED,
+      columnWidths: colWidths,
+      rows: [headerRow, ...bodyRows],
+    });
+
+    return {
+      properties: {
+        page: {
+          size: { width: 11906, height: 16838 },
+          margin: { top: 720, bottom: 720, left: 720, right: 720 },
+        },
+      },
+      children: [
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { after: 100 },
+          children: [
+            makeRun(
+              `${params.schoolSettings.schoolName} ${yearInfo.academicYear} 學年度 ${group.className} 日課表`,
+              { bold: true, size: 32 }
+            ),
+          ],
+        }),
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { after: 200 },
+          children: [
+            makeRun(
+              `學年度期間：${yearInfo.rangeText}　｜　年級：${group.grade || '—'}　｜　教室：${group.building} ${group.floor} ${group.roomNumber}　｜　排課總計：${group.slots.length} 節`,
+              { size: 19, color: '4A4F4B' }
+            ),
+          ],
+        }),
+        table,
+      ],
+    };
+  });
+
+  const docObj = new Document({ sections });
+  const blob = await Packer.toBlob(docObj);
+
+  const safeSchool =
+    params.schoolSettings.schoolName.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '') || '學校';
+  const scopeLabel =
+    groups.length === 1 ? groups[0].className : `全校${groups.length}班`;
+  const filename = `${safeSchool}_${yearInfo.academicYear}學年度_${scopeLabel}_日課表.docx`;
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  return groups.length;
+}
+
+/**
+ * Opens a clean hidden print frame to print or save one or all classes' timetables as A4 PDF.
+ */
+export function printClassTimetablesPdf(params: {
+  schoolSettings: SchoolSettings;
+  timetables: TimetableSlot[];
+  selectedClassNames?: string[];
+}): number {
+  const groups = groupTimetablesByClass(params.timetables, params.selectedClassNames);
+  if (groups.length === 0) {
+    throw new Error('沒有可列印的班級課表資料');
+  }
+
+  const yearInfo = getAcademicYearPeriod(params.schoolSettings.academicYear);
+  const pagesHtml = groups
+    .map((group, idx) => {
+      const slotMap = new Map<string, TimetableSlot[]>();
+      group.slots.forEach((s) => {
+        const k = `${s.dayOfWeek}-${s.period}`;
+        const arr = slotMap.get(k) || [];
+        arr.push(s);
+        slotMap.set(k, arr);
+      });
+
+      const rowsHtml = PERIOD_SCHEDULE.filter((p) => p.period <= group.maxPeriod)
+        .map((p) => {
+          const cols = [1, 2, 3, 4, 5]
+            .map((dow) => {
+              const items = slotMap.get(`${dow}-${p.period}`) || [];
+              if (items.length === 0) {
+                return `<td class="empty">—</td>`;
+              }
+              const inner = items
+                .map(
+                  (slot) =>
+                    `<div class="subject">${escapeHtml(slot.subject)}</div><div class="teacher">${escapeHtml(slot.teacherName)}</div>${
+                      slot.isRelocated && slot.locationNote
+                        ? `<div class="loc">${escapeHtml(slot.locationNote)}</div>`
+                        : ''
+                    }`
+                )
+                .join('<hr class="split"/>');
+              return `<td>${inner}</td>`;
+            })
+            .join('');
+          return `<tr><th class="period"><div>${escapeHtml(p.label)}</div><div class="time">${p.start}–${p.end}</div></th>${cols}</tr>`;
+        })
+        .join('');
+
+      return `
+        <section class="page ${idx < groups.length - 1 ? 'break' : ''}">
+          <h1>${escapeHtml(params.schoolSettings.schoolName)} ${escapeHtml(yearInfo.academicYear)} 學年度 ${escapeHtml(group.className)} 日課表</h1>
+          <p class="meta">學年度期間：${escapeHtml(yearInfo.rangeText)} ｜ 年級：${escapeHtml(group.grade || '—')} ｜ 教室：${escapeHtml(group.building)} ${escapeHtml(group.floor)} ${escapeHtml(group.roomNumber)} ｜ 排課總計：${group.slots.length} 節</p>
+          <table>
+            <thead>
+              <tr>
+                <th style="width:16%">節次／時間</th>
+                <th style="width:16.8%">星期一</th>
+                <th style="width:16.8%">星期二</th>
+                <th style="width:16.8%">星期三</th>
+                <th style="width:16.8%">星期四</th>
+                <th style="width:16.8%">星期五</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </section>
+      `;
+    })
+    .join('');
+
+  const html = `<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<title>${escapeHtml(params.schoolSettings.schoolName)} ${escapeHtml(yearInfo.academicYear)} 學年度 班級日課表</title>
+<style>
+  @page { size: A4 portrait; margin: 12mm; }
+  body { font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", serif; color: #111; margin: 0; }
+  .page { padding: 4px 0; }
+  .break { page-break-after: always; break-after: page; }
+  h1 { text-align: center; font-size: 20px; margin: 0 0 6px; letter-spacing: 1px; }
+  .meta { text-align: center; font-size: 12px; color: #444; margin: 0 0 14px; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th, td { border: 1px solid #222; text-align: center; vertical-align: middle; padding: 8px 4px; }
+  thead th { background: #E8F1EE; font-size: 13px; padding: 9px 4px; }
+  th.period { background: #FAF9F5; font-size: 12px; }
+  .time { font-size: 10px; color: #555; font-weight: normal; margin-top: 2px; }
+  td { height: 74px; }
+  .subject { font-size: 14px; font-weight: 700; line-height: 1.3; }
+  .teacher { font-size: 12px; color: #333; margin-top: 3px; }
+  .loc { font-size: 10px; color: #245A84; margin-top: 2px; }
+  .empty { color: #999; font-size: 12px; }
+  .split { border: 0; border-top: 1px dashed #ccc; margin: 4px 0; }
+</style>
+</head>
+<body>${pagesHtml}</body>
+</html>`;
+
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  document.body.appendChild(iframe);
+
+  const frameDoc = iframe.contentWindow?.document;
+  if (!frameDoc || !iframe.contentWindow) {
+    document.body.removeChild(iframe);
+    throw new Error('無法建立列印檢視，請改用 Word 下載');
+  }
+
+  frameDoc.open();
+  frameDoc.write(html);
+  frameDoc.close();
+
+  const triggerPrint = () => {
+    iframe.contentWindow?.focus();
+    iframe.contentWindow?.print();
+    window.setTimeout(() => {
+      if (iframe.parentNode) {
+        iframe.parentNode.removeChild(iframe);
+      }
+    }, 1500);
+  };
+
+  window.setTimeout(triggerPrint, 250);
+  return groups.length;
 }
